@@ -1,0 +1,2123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>HawkSkies — GPS Zero-Light-Pollution &amp; AR Constellation Viewer</title>
+  <script src="https://cdn.tailwindcss.com/3.4.17"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+    :root {
+      --bg-glass: rgba(8, 13, 28, 0.78);
+      --bg-glass-strong: rgba(7, 11, 24, 0.90);
+      --border-glass: rgba(125, 211, 252, 0.22);
+      --accent: #38bdf8;
+      --accent-warm: #fbbf24;
+      --text-main: #f1f5f9;
+      --text-dim: #94a3b8;
+    }
+
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #02040a;
+      color: var(--text-main);
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    .mono { font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace; }
+
+    #viewport {
+      position: fixed;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #02040a;
+    }
+
+    #cameraVideo {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      opacity: 0;
+      transition: opacity 0.35s ease;
+      pointer-events: none;
+      z-index: 1;
+    }
+
+    #cameraVideo.active {
+      opacity: 1;
+    }
+
+    #skyCanvas {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      display: block;
+      cursor: grab;
+      touch-action: none;
+      z-index: 2;
+    }
+
+    #skyCanvas:active { cursor: grabbing; }
+
+    .glass {
+      background: var(--bg-glass);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      border: 1px solid var(--border-glass);
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+    }
+
+    .glass-strong {
+      background: var(--bg-glass-strong);
+      backdrop-filter: blur(18px);
+      -webkit-backdrop-filter: blur(18px);
+      border: 1px solid var(--border-glass);
+      box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6);
+    }
+
+    /* Night Vision Red Mode (preserves dark-adapted vision outdoors) */
+    body.night-vision {
+      filter: sepia(100%) hue-rotate(-52deg) saturate(380%) brightness(0.82) contrast(1.08);
+    }
+
+    /* Custom range sliders */
+    input[type="range"] {
+      -webkit-appearance: none;
+      appearance: none;
+      height: 5px;
+      border-radius: 999px;
+      background: rgba(148, 163, 184, 0.25);
+      outline: none;
+    }
+    input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      background: #38bdf8;
+      border: 2px solid #e0f2fe;
+      cursor: pointer;
+      box-shadow: 0 0 10px rgba(56, 189, 248, 0.65);
+    }
+    input[type="range"]::-moz-range-thumb {
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      background: #38bdf8;
+      border: 2px solid #e0f2fe;
+      cursor: pointer;
+      box-shadow: 0 0 10px rgba(56, 189, 248, 0.65);
+    }
+
+    .hud-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      padding: 7px 11px;
+      border-radius: 10px;
+      font-size: 12px;
+      font-weight: 600;
+      color: #cbd5e1;
+      background: rgba(15, 23, 42, 0.72);
+      border: 1px solid rgba(148, 163, 184, 0.24);
+      transition: all 0.18s ease;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .hud-btn:hover {
+      background: rgba(30, 41, 59, 0.9);
+      border-color: rgba(56, 189, 248, 0.55);
+      color: #f8fafc;
+    }
+    .hud-btn.active {
+      background: rgba(14, 165, 233, 0.24);
+      border-color: rgba(56, 189, 248, 0.85);
+      color: #e0f2fe;
+      box-shadow: 0 0 14px rgba(56, 189, 248, 0.28);
+    }
+    .hud-btn.active-warm {
+      background: rgba(245, 158, 11, 0.22);
+      border-color: rgba(251, 191, 36, 0.85);
+      color: #fef3c7;
+      box-shadow: 0 0 14px rgba(245, 158, 11, 0.25);
+    }
+    .hud-btn.active-red {
+      background: rgba(239, 68, 68, 0.24);
+      border-color: rgba(248, 113, 113, 0.85);
+      color: #fee2e2;
+    }
+
+    /* Scrollbar inside drawer */
+    .thin-scroll::-webkit-scrollbar { width: 5px; }
+    .thin-scroll::-webkit-scrollbar-track { background: transparent; }
+    .thin-scroll::-webkit-scrollbar-thumb {
+      background: rgba(148, 163, 184, 0.3);
+      border-radius: 999px;
+    }
+
+    #centerReticle {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      transform: translate(-50%, -50%);
+      width: 34px;
+      height: 34px;
+      pointer-events: none;
+      z-index: 3;
+      opacity: 0.42;
+    }
+
+    #toastBox {
+      position: fixed;
+      top: 72px;
+      left: 50%;
+      transform: translateX(-50%) translateY(-12px);
+      z-index: 60;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.25s ease, transform 0.25s ease;
+    }
+    #toastBox.show {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+    }
+  </style>
+</head>
+<body>
+  <div id="viewport">
+    <!-- Live Rear Camera Feed (AR Mode) -->
+    <video id="cameraVideo" autoplay playsinline muted></video>
+
+    <!-- Real-Time Astronomical Sky Dome Canvas -->
+    <canvas id="skyCanvas"></canvas>
+
+    <!-- Subtle Center Aim Reticle -->
+    <svg id="centerReticle" viewBox="0 0 40 40" fill="none" aria-hidden="true">
+      <circle cx="20" cy="20" r="14" stroke="#38bdf8" stroke-width="1" stroke-dasharray="3 4" />
+      <line x1="20" y1="2" x2="20" y2="9" stroke="#38bdf8" stroke-width="1" />
+      <line x1="20" y1="31" x2="20" y2="38" stroke="#38bdf8" stroke-width="1" />
+      <line x1="2" y1="20" x2="9" y2="20" stroke="#38bdf8" stroke-width="1" />
+      <line x1="31" y1="20" x2="38" y2="20" stroke="#38bdf8" stroke-width="1" />
+      <circle cx="20" cy="20" r="1.5" fill="#38bdf8" />
+    </svg>
+
+    <!-- Non-blocking Toast Notification -->
+    <div id="toastBox" class="glass-strong rounded-xl px-4 py-2 text-xs font-medium text-sky-100 max-w-md text-center"></div>
+
+    <!-- TOP HUD BAR -->
+    <header class="fixed top-3 left-3 right-3 z-20 flex flex-wrap items-center justify-between gap-2 pointer-events-none">
+      <!-- Brand + Live Telemetry -->
+      <div class="glass rounded-2xl px-3.5 py-2 flex items-center gap-3 pointer-events-auto max-w-full">
+        <div class="flex items-center gap-2 shrink-0">
+          <div class="w-8 h-8 rounded-xl bg-gradient-to-br from-sky-400 via-indigo-500 to-violet-600 flex items-center justify-center shadow-lg shadow-sky-500/25">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 2l2.4 7.2L22 12l-7.6 2.8L12 22l-2.4-7.2L2 12l7.6-2.8z"/>
+            </svg>
+          </div>
+          <div>
+            <div class="flex items-center gap-1.5">
+              <h1 class="text-sm font-bold tracking-tight text-white leading-none">HawkSkies</h1>
+              <span id="skyStateBadge" class="text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-sky-500/20 text-sky-300 border border-sky-400/30">ZERO POLLUTION</span>
+            </div>
+            <div id="telemetrySub" class="text-[11px] text-slate-400 mono leading-tight mt-0.5 truncate max-w-[210px] sm:max-w-[360px]">
+              South River, NJ • 40.44°N, 74.38°W
+            </div>
+          </div>
+        </div>
+
+        <div class="hidden md:flex items-center gap-3 pl-3 border-l border-slate-700/70 text-[11px] mono">
+          <div>
+            <div class="text-[9px] uppercase tracking-wider text-slate-400">Heading / Alt</div>
+            <div id="hudAzAlt" class="text-sky-300 font-semibold">165.0° S • +32.0°</div>
+          </div>
+          <div>
+            <div class="text-[9px] uppercase tracking-wider text-slate-400">Local Sidereal</div>
+            <div id="hudLST" class="text-amber-300 font-semibold">00h 00m 00s</div>
+          </div>
+          <div>
+            <div class="text-[9px] uppercase tracking-wider text-slate-400">Sun Alt</div>
+            <div id="hudSunAlt" class="text-slate-200 font-semibold">-18.0° (Night)</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Primary AR / Sensor / Drawer Actions -->
+      <div class="flex items-center gap-1.5 pointer-events-auto flex-wrap justify-end">
+        <button id="btnCameraAR" class="hud-btn" title="Open live camera AR overlay">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+          <span>Camera AR</span>
+        </button>
+        <button id="btnGyro" class="hud-btn" title="Track device motion and compass orientation">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/></svg>
+          <span class="hidden sm:inline">Motion</span>
+        </button>
+        <button id="btnGPS" class="hud-btn" title="Lock to your live GPS coordinates">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+          <span class="hidden sm:inline">GPS</span>
+        </button>
+        <button id="btnToggleDrawer" class="hud-btn active" title="Open Sky Controls & Constellation Finder">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg>
+          <span>Sky Lab</span>
+        </button>
+      </div>
+    </header>
+
+    <!-- COLLAPSIBLE RIGHT DRAWER: Sky Lab (GPS, Time, Constellations, AR Blend, Export) -->
+    <aside id="skyDrawer" class="fixed top-[68px] right-3 bottom-[84px] w-[310px] max-w-[calc(100vw-24px)] z-30 glass-strong rounded-2xl flex flex-col overflow-hidden transition-all duration-200">
+      <!-- Drawer Tabs -->
+      <div class="flex border-b border-slate-700/70 p-1.5 gap-1 shrink-0">
+        <button id="tabFinder" class="flex-1 py-1.5 text-xs font-semibold rounded-lg bg-sky-500/25 text-sky-200 border border-sky-400/40 cursor-pointer">Constellations</button>
+        <button id="tabLocation" class="flex-1 py-1.5 text-xs font-semibold rounded-lg text-slate-400 hover:text-white cursor-pointer">GPS &amp; Time</button>
+        <button id="tabOptics" class="flex-1 py-1.5 text-xs font-semibold rounded-lg text-slate-400 hover:text-white cursor-pointer">Optics</button>
+      </div>
+
+      <!-- TAB 1: CONSTELLATION & DSO FINDER -->
+      <div id="paneFinder" class="flex-1 flex flex-col overflow-hidden p-3 gap-2.5">
+        <div class="relative">
+          <input id="inputSearch" type="text" placeholder="Search constellations, stars, Messier..." class="w-full bg-slate-900/80 border border-slate-700/80 rounded-xl pl-8 pr-3 py-2 text-xs text-white placeholder-slate-400 focus:outline-none focus:border-sky-400" />
+          <svg class="absolute left-2.5 top-2.5 text-slate-400" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        </div>
+        <div class="flex items-center justify-between text-[11px] text-slate-400 px-0.5">
+          <span id="visibleCountLabel">Visible above horizon: --</span>
+          <button id="btnAutoScan" class="text-sky-300 hover:text-sky-200 font-semibold cursor-pointer">Auto-Scan: OFF</button>
+        </div>
+        <div id="constellationList" class="flex-1 overflow-y-auto thin-scroll space-y-1.5 pr-1"></div>
+      </div>
+
+      <!-- TAB 2: GPS & TIME TRAVEL -->
+      <div id="paneLocation" class="hidden flex-1 overflow-y-auto thin-scroll p-3 space-y-3.5">
+        <div>
+          <div class="text-[11px] font-semibold uppercase tracking-wider text-sky-300 mb-1.5">Observer GPS Coordinates</div>
+          <div class="grid grid-cols-2 gap-2">
+            <div>
+              <label for="inputLat" class="text-[10px] text-slate-400 block mb-0.5">Latitude (°N)</label>
+              <input id="inputLat" type="number" step="0.0001" min="-90" max="90" value="40.4444" class="w-full bg-slate-900/90 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs mono text-white focus:outline-none focus:border-sky-400" />
+            </div>
+            <div>
+              <label for="inputLon" class="text-[10px] text-slate-400 block mb-0.5">Longitude (°E)</label>
+              <input id="inputLon" type="number" step="0.0001" min="-180" max="180" value="-74.3818" class="w-full bg-slate-900/90 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs mono text-white focus:outline-none focus:border-sky-400" />
+            </div>
+          </div>
+          <div class="flex gap-1.5 mt-2">
+            <button id="btnApplyCoords" class="hud-btn active flex-1 py-1.5">Apply Coords</button>
+            <button id="btnGPSDrawer" class="hud-btn flex-1 py-1.5">Use Live GPS</button>
+          </div>
+        </div>
+
+        <div>
+          <div class="text-[11px] font-semibold uppercase tracking-wider text-sky-300 mb-1.5">Dark-Sky &amp; Global Presets</div>
+          <div class="grid grid-cols-1 gap-1.5" id="presetButtons">
+            <button id="presetSouthRiver" class="hud-btn justify-between text-left px-2.5 py-1.5" data-lat="40.4444" data-lon="-74.3818" data-name="South River, NJ">
+              <span>South River, NJ</span><span class="mono text-[10px] text-slate-400">40.44°N, 74.38°W</span>
+            </button>
+            <button id="presetCherrySprings" class="hud-btn justify-between text-left px-2.5 py-1.5" data-lat="41.6600" data-lon="-77.8200" data-name="Cherry Springs, PA">
+              <span>Cherry Springs Dark Sky, PA</span><span class="mono text-[10px] text-slate-400">Bortle 2</span>
+            </button>
+            <button id="presetMaunaKea" class="hud-btn justify-between text-left px-2.5 py-1.5" data-lat="19.8200" data-lon="-155.4700" data-name="Mauna Kea, HI">
+              <span>Mauna Kea Summit, HI</span><span class="mono text-[10px] text-slate-400">Bortle 1</span>
+            </button>
+            <button id="presetJoshuaTree" class="hud-btn justify-between text-left px-2.5 py-1.5" data-lat="33.8700" data-lon="-115.9000" data-name="Joshua Tree, CA">
+              <span>Joshua Tree Park, CA</span><span class="mono text-[10px] text-slate-400">Bortle 2</span>
+            </button>
+            <button id="presetNaturalBridges" class="hud-btn justify-between text-left px-2.5 py-1.5" data-lat="37.6000" data-lon="-110.0000" data-name="Natural Bridges, UT">
+              <span>Natural Bridges, UT</span><span class="mono text-[10px] text-slate-400">Bortle 2</span>
+            </button>
+            <button id="presetCerroPachon" class="hud-btn justify-between text-left px-2.5 py-1.5" data-lat="-30.2408" data-lon="-70.7367" data-name="Cerro Pachón, Chile">
+              <span>Cerro Pachón (Southern Sky)</span><span class="mono text-[10px] text-slate-400">Bortle 1</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="pt-2 border-t border-slate-700/70">
+          <div class="flex items-center justify-between mb-1.5">
+            <span class="text-[11px] font-semibold uppercase tracking-wider text-amber-300">Sky Time Control</span>
+            <button id="btnTimeNow" class="text-[11px] text-sky-300 hover:underline font-semibold cursor-pointer">Reset to Now</button>
+          </div>
+          <div id="clockReadout" class="mono text-xs text-white bg-slate-900/80 border border-slate-700/80 rounded-lg px-2.5 py-1.5 mb-2 text-center">--</div>
+          <label for="sliderTimeOffset" class="flex justify-between text-[10px] text-slate-400 mb-1">
+            <span>24h Time Scrubber</span>
+            <span id="timeOffsetLabel" class="mono text-sky-300">+0.0h (Live)</span>
+          </label>
+          <input id="sliderTimeOffset" type="range" min="-12" max="12" step="0.1" value="0" class="w-full mb-2.5" />
+          <div class="flex items-center gap-1.5">
+            <button id="btnTimePlay" class="hud-btn flex-1 py-1.5">▶ Time-Lapse</button>
+            <select id="selectTimeSpeed" class="bg-slate-900/90 border border-slate-700 rounded-lg px-2 py-1.5 text-xs mono text-slate-200 focus:outline-none">
+              <option value="60">60× (1m/s)</option>
+              <option value="600" selected>600× (10m/s)</option>
+              <option value="3600">3600× (1h/s)</option>
+            </select>
+          </div>
+          <div class="mt-2">
+            <label for="inputDateTime" class="text-[10px] text-slate-400 block mb-0.5">Jump to Exact Date &amp; Time</label>
+            <input id="inputDateTime" type="datetime-local" class="w-full bg-slate-900/90 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs mono text-white focus:outline-none focus:border-sky-400" />
+          </div>
+        </div>
+      </div>
+
+      <!-- TAB 3: OPTICS, AR BLEND, AUDIO & EXPORT -->
+      <div id="paneOptics" class="hidden flex-1 overflow-y-auto thin-scroll p-3 space-y-3.5">
+        <div>
+          <div class="flex justify-between text-[11px] mb-1">
+            <span class="font-semibold text-sky-300">Field of View (Zoom)</span>
+            <span id="fovReadout" class="mono text-slate-300">68°</span>
+          </div>
+          <input id="sliderFOV" type="range" min="25" max="110" step="1" value="68" class="w-full" />
+        </div>
+
+        <div>
+          <div class="flex justify-between text-[11px] mb-1">
+            <span class="font-semibold text-sky-300">AR Sky Overlay Opacity</span>
+            <span id="camOpacityReadout" class="mono text-slate-300">85%</span>
+          </div>
+          <input id="sliderCamOpacity" type="range" min="20" max="100" step="1" value="85" class="w-full" />
+          <p class="text-[10px] text-slate-400 mt-1">Controls starfield transparency when Camera AR is active.</p>
+        </div>
+
+        <div class="grid grid-cols-2 gap-1.5 pt-1">
+          <button id="btnToggleGrid" class="hud-btn py-2">Alt/Az Grid</button>
+          <button id="btnToggleGround" class="hud-btn active py-2">Horizon Mask</button>
+          <button id="btnToggleMilkyWay" class="hud-btn active py-2">Milky Way</button>
+          <button id="btnToggleDSO" class="hud-btn active py-2">Deep Sky (M)</button>
+          <button id="btnToggleNightVision" class="hud-btn py-2">Red Night Mode</button>
+          <button id="btnAudio" class="hud-btn py-2">Space Synth: OFF</button>
+        </div>
+
+        <div class="p-2.5 rounded-xl bg-slate-900/75 border border-slate-700/70 space-y-1.5">
+          <div class="text-[11px] font-semibold text-amber-300">How Light Pollution &amp; Daylight Stripping Works</div>
+          <p class="text-[11px] text-slate-300 leading-relaxed">
+            HawkSkies calculates every star's true Alt/Az position from your GPS coordinates and Local Sidereal Time, then strips solar atmospheric scattering and artificial skyglow to reveal a <strong class="text-white">Bortle Class 1</strong> pristine sky (limiting mag ~6.8) even at high noon.
+          </p>
+        </div>
+
+        <div class="pt-2 border-t border-slate-700/70 space-y-2">
+          <button id="btnExportHTML" class="hud-btn active w-full py-2">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            <span>Download HawkSkies (.html)</span>
+          </button>
+          <div class="text-[10px] mono text-slate-500 text-center">
+            ForefrontHawk • FH-GA-ΩΑΡ-20261121-MFF-G01-HTM-SKIES01
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    <!-- FLOATING STAR / CONSTELLATION INSPECTOR CARD (Bottom Left) -->
+    <section id="inspectorCard" class="hidden fixed bottom-[84px] left-3 w-[310px] max-w-[calc(100vw-24px)] z-30 glass-strong rounded-2xl p-3.5">
+      <div class="flex items-start justify-between gap-2">
+        <div>
+          <div class="flex items-center gap-1.5">
+            <span id="inspDot" class="w-2.5 h-2.5 rounded-full bg-sky-300 inline-block"></span>
+            <h2 id="inspName" class="text-sm font-bold text-white leading-tight">Betelgeuse</h2>
+          </div>
+          <div id="inspSub" class="text-[11px] text-sky-300 font-medium mt-0.5">α Orionis • Orion</div>
+        </div>
+        <div class="flex items-center gap-1">
+          <button id="btnCenterSelected" class="hud-btn px-2 py-1 text-[11px]" title="Center sky view on this object">Center</button>
+          <button id="btnCloseInspector" class="hud-btn px-2 py-1 text-[11px]" title="Close inspector">✕</button>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-3 gap-1.5 mt-2.5 text-center">
+        <div class="bg-slate-900/80 border border-slate-700/70 rounded-lg p-1.5">
+          <div class="text-[9px] uppercase text-slate-400">Magnitude</div>
+          <div id="inspMag" class="text-xs font-bold mono text-white">0.50</div>
+        </div>
+        <div class="bg-slate-900/80 border border-slate-700/70 rounded-lg p-1.5">
+          <div class="text-[9px] uppercase text-slate-400">Distance</div>
+          <div id="inspDist" class="text-xs font-bold mono text-white">~548 ly</div>
+        </div>
+        <div class="bg-slate-900/80 border border-slate-700/70 rounded-lg p-1.5">
+          <div class="text-[9px] uppercase text-slate-400">Spectral</div>
+          <div id="inspSpec" class="text-xs font-bold mono text-amber-300">M1I</div>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-2 gap-1.5 mt-1.5 text-[11px] mono">
+        <div class="bg-slate-900/60 rounded-lg px-2 py-1 flex justify-between">
+          <span class="text-slate-400">Alt/Az:</span>
+          <span id="inspAltAz" class="text-sky-300">+42° / 165°</span>
+        </div>
+        <div class="bg-slate-900/60 rounded-lg px-2 py-1 flex justify-between">
+          <span class="text-slate-400">RA/Dec:</span>
+          <span id="inspRaDec" class="text-slate-200">5h55m / +7°</span>
+        </div>
+      </div>
+
+      <div id="inspAgeBox" class="mt-2 p-2 rounded-lg bg-indigo-950/60 border border-indigo-400/25 text-[11px] text-indigo-100 leading-snug">
+        <span class="font-semibold text-amber-300">Cosmic Age:</span> <span id="inspAgeText">~8–10 million years old</span>
+      </div>
+    </section>
+
+    <!-- BOTTOM QUICK-CONTROL DOCK -->
+    <footer class="fixed bottom-3 left-3 right-3 z-20 flex justify-center pointer-events-none">
+      <div class="glass rounded-2xl px-3 py-2 flex flex-wrap items-center justify-center gap-2 sm:gap-3 pointer-events-auto max-w-full">
+        <!-- Bortle Light Pollution Slider -->
+        <div class="flex items-center gap-2 min-w-[185px] sm:min-w-[235px]">
+          <div class="shrink-0">
+            <div class="text-[10px] uppercase tracking-wider text-slate-400 leading-none">Light Pollution</div>
+            <div id="bortleLabel" class="text-xs font-bold text-sky-300 leading-tight mt-0.5">Bortle 1 • Pristine</div>
+          </div>
+          <input id="sliderBortle" type="range" min="1" max="9" step="1" value="1" class="w-24 sm:w-28" title="Simulate Bortle Class 1 (zero light pollution) to Class 9 (inner city)" />
+        </div>
+
+        <div class="h-6 w-px bg-slate-700/70 hidden sm:block"></div>
+
+        <!-- Quick Sky Toggles -->
+        <div class="flex items-center gap-1.5 flex-wrap justify-center">
+          <button id="btnToggleDaylight" class="hud-btn active-warm" title="Remove solar daylight glow to reveal stars even during the day">
+            <span>☀ Strip Daylight: ON</span>
+          </button>
+          <button id="btnToggleLines" class="hud-btn active" title="Show or hide constellation stick figures">
+            <span>Lines</span>
+          </button>
+          <button id="btnToggleLabels" class="hud-btn active" title="Show or hide star and constellation labels">
+            <span>Labels</span>
+          </button>
+          <button id="btnZoomIn" class="hud-btn px-2.5" title="Zoom in">＋</button>
+          <button id="btnZoomOut" class="hud-btn px-2.5" title="Zoom out">－</button>
+        </div>
+      </div>
+    </footer>
+  </div>
+
+  <script>
+    (() => {
+      'use strict';
+
+      // =========================================================================
+      // 1. VERIFIED ASTRONOMICAL CATALOG (J2000 RA in hours, Dec in degrees)
+      // =========================================================================
+      const BORTLE_INFO = {
+        1: { name: 'Pristine Dark Sky', limMag: 6.8, mwAlpha: 1.0, glow: 0.0, sqm: '> 21.9' },
+        2: { name: 'Truly Dark Sky', limMag: 6.4, mwAlpha: 0.85, glow: 0.05, sqm: '21.5–21.9' },
+        3: { name: 'Rural Sky', limMag: 6.0, mwAlpha: 0.65, glow: 0.12, sqm: '21.3–21.5' },
+        4: { name: 'Rural/Suburban', limMag: 5.5, mwAlpha: 0.42, glow: 0.22, sqm: '20.4–21.3' },
+        5: { name: 'Suburban Sky', limMag: 5.0, mwAlpha: 0.20, glow: 0.36, sqm: '19.5–20.4' },
+        6: { name: 'Bright Suburban', limMag: 4.5, mwAlpha: 0.08, glow: 0.50, sqm: '18.5–19.5' },
+        7: { name: 'Suburban/Urban', limMag: 4.0, mwAlpha: 0.02, glow: 0.66, sqm: '18.0–18.5' },
+        8: { name: 'City Sky', limMag: 3.4, mwAlpha: 0.0, glow: 0.82, sqm: '17.5–18.0' },
+        9: { name: 'Inner-City Sky', limMag: 2.7, mwAlpha: 0.0, glow: 0.96, sqm: '< 17.5' }
+      };
+
+      // Spectral class -> accurate visual star tint
+      const SPECTRAL_COLORS = {
+        O: '#9bb8ff',
+        B: '#b7d0ff',
+        A: '#e4eeff',
+        F: '#fff8ea',
+        G: '#ffe9b8',
+        K: '#ffc57d',
+        M: '#ff9666'
+      };
+
+      // Named & Constellation Stars (id, name, bayer, con, ra [h], dec [deg], mag, spec, distLy, age)
+      const STARS = [
+        // ORION
+        { id: 'ori_alp', name: 'Betelgeuse', bayer: 'α Ori', con: 'Orion', ra: 5.9195, dec: 7.4071, mag: 0.50, spec: 'M1I', dist: '548 ly', age: '~8–10 million years (red supergiant — ~150× older than humanity’s earliest cave paintings)' },
+        { id: 'ori_bet', name: 'Rigel', bayer: 'β Ori', con: 'Orion', ra: 5.2423, dec: -8.2016, mag: 0.13, spec: 'B8I', dist: '848 ly', age: '~8 million years (blue supergiant burning 120,000× brighter than our Sun)' },
+        { id: 'ori_gam', name: 'Bellatrix', bayer: 'γ Ori', con: 'Orion', ra: 5.4189, dec: 6.3497, mag: 1.64, spec: 'B2III', dist: '250 ly', age: '~25 million years' },
+        { id: 'ori_del', name: 'Mintaka', bayer: 'δ Ori', con: 'Orion', ra: 5.5334, dec: -0.2991, mag: 2.23, spec: 'O9.5', dist: '1,200 ly', age: '~6 million years (west star of Orion’s Belt)' },
+        { id: 'ori_eps', name: 'Alnilam', bayer: 'ε Ori', con: 'Orion', ra: 5.6036, dec: -1.2019, mag: 1.69, spec: 'B0I', dist: '1,976 ly', age: '~5.7 million years (center star of Orion’s Belt)' },
+        { id: 'ori_zet', name: 'Alnitak', bayer: 'ζ Ori', con: 'Orion', ra: 5.6793, dec: -1.9426, mag: 1.77, spec: 'O9.7', dist: '1,260 ly', age: '~6.4 million years (east star of Orion’s Belt)' },
+        { id: 'ori_kap', name: 'Saiph', bayer: 'κ Ori', con: 'Orion', ra: 5.7959, dec: -9.6696, mag: 2.09, spec: 'B0.5', dist: '650 ly', age: '~11 million years' },
+        { id: 'ori_lam', name: 'Meissa', bayer: 'λ Ori', con: 'Orion', ra: 5.5856, dec: 9.9342, mag: 3.33, spec: 'O8III', dist: '1,100 ly', age: '~5 million years' },
+
+        // URSA MAJOR (Big Dipper)
+        { id: 'uma_alp', name: 'Dubhe', bayer: 'α UMa', con: 'Ursa Major', ra: 11.0621, dec: 61.7510, mag: 1.79, spec: 'K0III', dist: '123 ly', age: '~280 million years (pointer star to Polaris)' },
+        { id: 'uma_bet', name: 'Merak', bayer: 'β UMa', con: 'Ursa Major', ra: 11.0307, dec: 56.3824, mag: 2.37, spec: 'A1V', dist: '79 ly', age: '~500 million years (pointer star to Polaris)' },
+        { id: 'uma_gam', name: 'Phecda', bayer: 'γ UMa', con: 'Ursa Major', ra: 11.8972, dec: 53.6948, mag: 2.44, spec: 'A0V', dist: '83 ly', age: '~300 million years' },
+        { id: 'uma_del', name: 'Megrez', bayer: 'δ UMa', con: 'Ursa Major', ra: 12.2570, dec: 57.0326, mag: 3.31, spec: 'A3V', dist: '80 ly', age: '~300 million years' },
+        { id: 'uma_eps', name: 'Alioth', bayer: 'ε UMa', con: 'Ursa Major', ra: 12.9005, dec: 55.9598, mag: 1.77, spec: 'A1p', dist: '82 ly', age: '~300 million years (brightest star in Ursa Major)' },
+        { id: 'uma_zet', name: 'Mizar', bayer: 'ζ UMa', con: 'Ursa Major', ra: 13.3988, dec: 54.9254, mag: 2.27, spec: 'A2V', dist: '83 ly', age: '~370 million years (famous visual double with Alcor)' },
+        { id: 'uma_eta', name: 'Alkaid', bayer: 'η UMa', con: 'Ursa Major', ra: 13.7923, dec: 49.3133, mag: 1.86, spec: 'B3V', dist: '104 ly', age: '~10 million years (tip of the Big Dipper handle)' },
+
+        // URSA MINOR (Little Dipper)
+        { id: 'umi_alp', name: 'Polaris', bayer: 'α UMi', con: 'Ursa Minor', ra: 2.5303, dec: 89.2641, mag: 2.00, spec: 'F7I', dist: '433 ly', age: '~70 million years (North Star — Cepheid supergiant)' },
+        { id: 'umi_del', name: 'Yildun', bayer: 'δ UMi', con: 'Ursa Minor', ra: 17.5369, dec: 86.5863, mag: 4.35, spec: 'A1V', dist: '172 ly', age: '~200 million years' },
+        { id: 'umi_eps', name: 'Urodelus', bayer: 'ε UMi', con: 'Ursa Minor', ra: 16.7662, dec: 82.0373, mag: 4.21, spec: 'G5III', dist: '303 ly', age: '~400 million years' },
+        { id: 'umi_zet', name: 'Alifa al Farkadain', bayer: 'ζ UMi', con: 'Ursa Minor', ra: 15.7343, dec: 77.7945, mag: 4.32, spec: 'A3V', dist: '376 ly', age: '~180 million years' },
+        { id: 'umi_bet', name: 'Kochab', bayer: 'β UMi', con: 'Ursa Minor', ra: 14.8451, dec: 74.1555, mag: 2.08, spec: 'K4III', dist: '131 ly', age: '~2.9 billion years (was the North Star ~3,000 years ago)' },
+        { id: 'umi_gam', name: 'Pherkad', bayer: 'γ UMi', con: 'Ursa Minor', ra: 15.3455, dec: 71.8340, mag: 3.05, spec: 'A3II', dist: '487 ly', age: '~80 million years' },
+        { id: 'umi_eta', name: 'Anwar al Farkadain', bayer: 'η UMi', con: 'Ursa Minor', ra: 16.2918, dec: 75.7553, mag: 4.95, spec: 'F5V', dist: '97 ly', age: '~1.2 billion years' },
+
+        // CASSIOPEIA
+        { id: 'cas_bet', name: 'Caph', bayer: 'β Cas', con: 'Cassiopeia', ra: 0.1530, dec: 59.1498, mag: 2.28, spec: 'F2III', dist: '55 ly', age: '~1.1 billion years' },
+        { id: 'cas_alp', name: 'Schedar', bayer: 'α Cas', con: 'Cassiopeia', ra: 0.6751, dec: 56.5373, mag: 2.24, spec: 'K0III', dist: '228 ly', age: '~100–200 million years' },
+        { id: 'cas_gam', name: 'Gamma Cas', bayer: 'γ Cas', con: 'Cassiopeia', ra: 0.9451, dec: 60.7167, mag: 2.15, spec: 'B0IV', dist: '550 ly', age: '~8 million years (rapidly spinning eruptive variable)' },
+        { id: 'cas_del', name: 'Ruchbah', bayer: 'δ Cas', con: 'Cassiopeia', ra: 1.4303, dec: 60.2353, mag: 2.68, spec: 'A5IV', dist: '99 ly', age: '~600 million years' },
+        { id: 'cas_eps', name: 'Segin', bayer: 'ε Cas', con: 'Cassiopeia', ra: 1.9066, dec: 63.6701, mag: 3.38, spec: 'B3III', dist: '410 ly', age: '~65 million years' },
+
+        // CYGNUS (Northern Cross)
+        { id: 'cyg_alp', name: 'Deneb', bayer: 'α Cyg', con: 'Cygnus', ra: 20.6905, dec: 45.2803, mag: 1.25, spec: 'A2I', dist: '2,615 ly', age: '~10 million years (one of the most luminous stars in the Milky Way)' },
+        { id: 'cyg_gam', name: 'Sadr', bayer: 'γ Cyg', con: 'Cygnus', ra: 20.3705, dec: 40.2567, mag: 2.23, spec: 'F8I', dist: '1,800 ly', age: '~12 million years' },
+        { id: 'cyg_eps', name: 'Gienah', bayer: 'ε Cyg', con: 'Cygnus', ra: 20.7702, dec: 33.9703, mag: 2.48, spec: 'K0III', dist: '73 ly', age: '~1.5 billion years' },
+        { id: 'cyg_del', name: 'Fawaris', bayer: 'δ Cyg', con: 'Cygnus', ra: 19.7496, dec: 45.1308, mag: 2.87, spec: 'B9.5', dist: '165 ly', age: '~280 million years' },
+        { id: 'cyg_bet', name: 'Albireo', bayer: 'β Cyg', con: 'Cygnus', ra: 19.5120, dec: 27.9597, mag: 3.05, spec: 'K3II', dist: '430 ly', age: '~100 million years (famous gold & sapphire binary star)' },
+
+        // LYRA
+        { id: 'lyr_alp', name: 'Vega', bayer: 'α Lyr', con: 'Lyra', ra: 18.6156, dec: 38.7837, mag: 0.03, spec: 'A0V', dist: '25 ly', age: '~455 million years (will be Earth’s North Star in 12,000 years)' },
+        { id: 'lyr_bet', name: 'Sheliak', bayer: 'β Lyr', con: 'Lyra', ra: 18.8347, dec: 33.3627, mag: 3.52, spec: 'B7V', dist: '960 ly', age: '~23 million years' },
+        { id: 'lyr_gam', name: 'Sulafat', bayer: 'γ Lyr', con: 'Lyra', ra: 18.9824, dec: 32.6896, mag: 3.25, spec: 'B9III', dist: '620 ly', age: '~150 million years' },
+        { id: 'lyr_del', name: 'Delta Lyr', bayer: 'δ Lyr', con: 'Lyra', ra: 18.9083, dec: 36.8986, mag: 4.22, spec: 'M4II', dist: '900 ly', age: '~75 million years' },
+        { id: 'lyr_zet', name: 'Zeta Lyr', bayer: 'ζ Lyr', con: 'Lyra', ra: 18.7462, dec: 37.6051, mag: 4.36, spec: 'A4V', dist: '152 ly', age: '~450 million years' },
+
+        // AQUILA
+        { id: 'aql_alp', name: 'Altair', bayer: 'α Aql', con: 'Aquila', ra: 19.8464, dec: 8.8683, mag: 0.76, spec: 'A7V', dist: '16.7 ly', age: '~1.2 billion years (spins once every 8.9 hours!)' },
+        { id: 'aql_gam', name: 'Tarazed', bayer: 'γ Aql', con: 'Aquila', ra: 19.7710, dec: 10.6133, mag: 2.72, spec: 'K3II', dist: '395 ly', age: '~100 million years' },
+        { id: 'aql_bet', name: 'Alshain', bayer: 'β Aql', con: 'Aquila', ra: 19.9219, dec: 6.4068, mag: 3.71, spec: 'G8IV', dist: '45 ly', age: '~9.6 billion years (more than twice the age of our Sun!)' },
+        { id: 'aql_del', name: 'Delta Aql', bayer: 'δ Aql', con: 'Aquila', ra: 19.4246, dec: 3.1148, mag: 3.36, spec: 'F2IV', dist: '51 ly', age: '~1.9 billion years' },
+        { id: 'aql_zet', name: 'Okab', bayer: 'ζ Aql', con: 'Aquila', ra: 19.0902, dec: 13.8635, mag: 2.99, spec: 'A0V', dist: '83 ly', age: '~200 million years' },
+        { id: 'aql_lam', name: 'Al Thalimain', bayer: 'λ Aql', con: 'Aquila', ra: 19.1041, dec: -4.8826, mag: 3.43, spec: 'B9V', dist: '125 ly', age: '~160 million years' },
+
+        // TAURUS
+        { id: 'tau_alp', name: 'Aldebaran', bayer: 'α Tau', con: 'Taurus', ra: 4.5987, dec: 16.5093, mag: 0.85, spec: 'K5III', dist: '65 ly', age: '~6.4 billion years (orange giant 44× wider than the Sun)' },
+        { id: 'tau_bet', name: 'Elnath', bayer: 'β Tau', con: 'Taurus', ra: 5.4382, dec: 28.6075, mag: 1.65, spec: 'B7III', dist: '134 ly', age: '~100 million years' },
+        { id: 'tau_zet', name: 'Tianguan', bayer: 'ζ Tau', con: 'Taurus', ra: 5.6274, dec: 21.1425, mag: 2.97, spec: 'B4III', dist: '440 ly', age: '~25 million years' },
+        { id: 'tau_gam', name: 'Prima Hyadum', bayer: 'γ Tau', con: 'Taurus', ra: 4.3299, dec: 15.6276, mag: 3.65, spec: 'G8III', dist: '154 ly', age: '~625 million years (Hyades cluster)' },
+        { id: 'tau_eps', name: 'Ain', bayer: 'ε Tau', con: 'Taurus', ra: 4.4769, dec: 19.1804, mag: 3.53, spec: 'K0III', dist: '146 ly', age: '~625 million years' },
+        { id: 'tau_eta', name: 'Alcyone', bayer: 'η Tau', con: 'Taurus', ra: 3.7914, dec: 24.1051, mag: 2.87, spec: 'B7III', dist: '440 ly', age: '~100 million years (brightest star of the Pleiades)' },
+
+        // GEMINI
+        { id: 'gem_bet', name: 'Pollux', bayer: 'β Gem', con: 'Gemini', ra: 7.7553, dec: 28.0262, mag: 1.14, spec: 'K0III', dist: '34 ly', age: '~724 million years (hosts confirmed exoplanet Thestias)' },
+        { id: 'gem_alp', name: 'Castor', bayer: 'α Gem', con: 'Gemini', ra: 7.5767, dec: 31.8883, mag: 1.58, spec: 'A1V', dist: '51 ly', age: '~370 million years (sextuple star system — 6 stars in one!)' },
+        { id: 'gem_gam', name: 'Alhena', bayer: 'γ Gem', con: 'Gemini', ra: 6.6285, dec: 16.3993, mag: 1.93, spec: 'A1IV', dist: '109 ly', age: '~300 million years' },
+        { id: 'gem_mu', name: 'Tejat', bayer: 'μ Gem', con: 'Gemini', ra: 6.3827, dec: 22.5136, mag: 2.87, spec: 'M3III', dist: '230 ly', age: '~1.2 billion years' },
+        { id: 'gem_eps', name: 'Mebsuta', bayer: 'ε Gem', con: 'Gemini', ra: 6.7322, dec: 25.1311, mag: 3.06, spec: 'G8I', dist: '840 ly', age: '~25 million years' },
+        { id: 'gem_del', name: 'Wasat', bayer: 'δ Gem', con: 'Gemini', ra: 7.3355, dec: 21.9823, mag: 3.53, spec: 'F0IV', dist: '60 ly', age: '~1.6 billion years' },
+
+        // CANIS MAJOR
+        { id: 'cma_alp', name: 'Sirius', bayer: 'α CMa', con: 'Canis Major', ra: 6.7525, dec: -16.7161, mag: -1.46, spec: 'A1V', dist: '8.6 ly', age: '~230 million years (brightest star in Earth’s entire night sky)' },
+        { id: 'cma_eps', name: 'Adhara', bayer: 'ε CMa', con: 'Canis Major', ra: 6.9771, dec: -28.9721, mag: 1.50, spec: 'B2II', dist: '405 ly', age: '~22 million years' },
+        { id: 'cma_del', name: 'Wezen', bayer: 'δ CMa', con: 'Canis Major', ra: 7.1399, dec: -26.3932, mag: 1.83, spec: 'F8I', dist: '1,600 ly', age: '~12 million years' },
+        { id: 'cma_bet', name: 'Mirzam', bayer: 'β CMa', con: 'Canis Major', ra: 6.3783, dec: -17.9559, mag: 1.98, spec: 'B1II', dist: '500 ly', age: '~12 million years' },
+        { id: 'cma_eta', name: 'Aludra', bayer: 'η CMa', con: 'Canis Major', ra: 7.4016, dec: -29.3031, mag: 2.45, spec: 'B5I', dist: '2,000 ly', age: '~8 million years' },
+
+        // CANIS MINOR
+        { id: 'cmi_alp', name: 'Procyon', bayer: 'α CMi', con: 'Canis Minor', ra: 7.6550, dec: 5.2250, mag: 0.34, spec: 'F5IV', dist: '11.5 ly', age: '~1.9 billion years (8th brightest star in the night sky)' },
+        { id: 'cmi_bet', name: 'Gomeisa', bayer: 'β CMi', con: 'Canis Minor', ra: 7.4525, dec: 8.2893, mag: 2.89, spec: 'B8V', dist: '162 ly', age: '~160 million years' },
+
+        // AURIGA
+        { id: 'aur_alp', name: 'Capella', bayer: 'α Aur', con: 'Auriga', ra: 5.2781, dec: 45.9980, mag: 0.08, spec: 'G8III', dist: '43 ly', age: '~600 million years (quadruple star system, 6th brightest star)' },
+        { id: 'aur_bet', name: 'Menkalinan', bayer: 'β Aur', con: 'Auriga', ra: 5.9921, dec: 44.9474, mag: 1.90, spec: 'A1IV', dist: '81 ly', age: '~570 million years' },
+        { id: 'aur_the', name: 'Mahasim', bayer: 'θ Aur', con: 'Auriga', ra: 5.9954, dec: 37.2126, mag: 2.65, spec: 'A0p', dist: '166 ly', age: '~250 million years' },
+        { id: 'aur_iot', name: 'Hassaleh', bayer: 'ι Aur', con: 'Auriga', ra: 4.9499, dec: 33.1661, mag: 2.69, spec: 'K3II', dist: '490 ly', age: '~50 million years' },
+
+        // LEO
+        { id: 'leo_alp', name: 'Regulus', bayer: 'α Leo', con: 'Leo', ra: 10.1395, dec: 11.9672, mag: 1.35, spec: 'B8IV', dist: '79 ly', age: '~150 million years (heart of the Lion)' },
+        { id: 'leo_gam', name: 'Algieba', bayer: 'γ Leo', con: 'Leo', ra: 10.3329, dec: 19.8415, mag: 2.01, spec: 'K1III', dist: '130 ly', age: '~1.5 billion years' },
+        { id: 'leo_bet', name: 'Denebola', bayer: 'β Leo', con: 'Leo', ra: 11.8177, dec: 14.5721, mag: 2.14, spec: 'A3V', dist: '36 ly', age: '~100–380 million years' },
+        { id: 'leo_del', name: 'Zosma', bayer: 'δ Leo', con: 'Leo', ra: 11.2351, dec: 20.5237, mag: 2.56, spec: 'A4V', dist: '58 ly', age: '~600 million years' },
+        { id: 'leo_eps', name: 'Algenubi', bayer: 'ε Leo', con: 'Leo', ra: 9.7642, dec: 23.7743, mag: 2.98, spec: 'G1II', dist: '247 ly', age: '~160 million years' },
+        { id: 'leo_zet', name: 'Adhafera', bayer: 'ζ Leo', con: 'Leo', ra: 10.2782, dec: 23.4173, mag: 3.44, spec: 'F0III', dist: '274 ly', age: '~450 million years' },
+        { id: 'leo_eta', name: 'Eta Leo', bayer: 'η Leo', con: 'Leo', ra: 10.1222, dec: 16.7627, mag: 3.52, spec: 'A0I', dist: '1,270 ly', age: '~25 million years' },
+        { id: 'leo_the', name: 'Chertan', bayer: 'θ Leo', con: 'Leo', ra: 11.2373, dec: 15.4296, mag: 3.33, spec: 'A2V', dist: '165 ly', age: '~450 million years' },
+
+        // BOÖTES
+        { id: 'boo_alp', name: 'Arcturus', bayer: 'α Boo', con: 'Boötes', ra: 14.2610, dec: 19.1824, mag: -0.05, spec: 'K1.5III', dist: '36.7 ly', age: '~7.1 billion years (ancient orange giant — older than our Solar System!)' },
+        { id: 'boo_eps', name: 'Izar', bayer: 'ε Boo', con: 'Boötes', ra: 14.7498, dec: 27.0742, mag: 2.35, spec: 'K0II', dist: '203 ly', age: '~37 million years' },
+        { id: 'boo_eta', name: 'Muphrid', bayer: 'η Boo', con: 'Boötes', ra: 13.9114, dec: 18.3977, mag: 2.68, spec: 'G0IV', dist: '37 ly', age: '~2.7 billion years' },
+        { id: 'boo_gam', name: 'Seginus', bayer: 'γ Boo', con: 'Boötes', ra: 14.5346, dec: 38.3083, mag: 3.03, spec: 'A7III', dist: '87 ly', age: '~900 million years' },
+        { id: 'boo_del', name: 'Delta Boo', bayer: 'δ Boo', con: 'Boötes', ra: 15.2584, dec: 33.3148, mag: 3.46, spec: 'G8III', dist: '122 ly', age: '~3.5 billion years' },
+        { id: 'boo_bet', name: 'Nekkar', bayer: 'β Boo', con: 'Boötes', ra: 15.0323, dec: 40.3906, mag: 3.49, spec: 'G8III', dist: '225 ly', age: '~250 million years' },
+
+        // VIRGO (Anchor for Spica)
+        { id: 'vir_alp', name: 'Spica', bayer: 'α Vir', con: 'Virgo', ra: 13.4199, dec: -11.1613, mag: 0.98, spec: 'B1III', dist: '250 ly', age: '~12.5 million years (close binary pair of blue giants)' },
+        { id: 'vir_gam', name: 'Porrima', bayer: 'γ Vir', con: 'Virgo', ra: 12.6943, dec: -1.4494, mag: 2.74, spec: 'F0V', dist: '38 ly', age: '~1.1 billion years' },
+        { id: 'vir_eps', name: 'Vindemiatrix', bayer: 'ε Vir', con: 'Virgo', ra: 13.0363, dec: 10.9591, mag: 2.85, spec: 'G8III', dist: '110 ly', age: '~560 million years' },
+        { id: 'vir_zet', name: 'Heze', bayer: 'ζ Vir', con: 'Virgo', ra: 13.5782, dec: -0.5958, mag: 3.38, spec: 'A3V', dist: '74 ly', age: '~500 million years' },
+        { id: 'vir_del', name: 'Minelauva', bayer: 'δ Vir', con: 'Virgo', ra: 12.9267, dec: 3.3975, mag: 3.39, spec: 'M3III', dist: '198 ly', age: '~3.2 billion years' },
+
+        // SCORPIUS
+        { id: 'sco_alp', name: 'Antares', bayer: 'α Sco', con: 'Scorpius', ra: 16.4901, dec: -26.4320, mag: 0.96, spec: 'M1.5I', dist: '550 ly', age: '~11–15 million years (red supergiant ~680× wider than our Sun)' },
+        { id: 'sco_lam', name: 'Shaula', bayer: 'λ Sco', con: 'Scorpius', ra: 17.5601, dec: -37.1038, mag: 1.62, spec: 'B2IV', dist: '570 ly', age: '~10–13 million years (stinger of the Scorpion)' },
+        { id: 'sco_the', name: 'Sargas', bayer: 'θ Sco', con: 'Scorpius', ra: 17.6220, dec: -42.9978, mag: 1.86, spec: 'F1II', dist: '300 ly', age: '~60 million years' },
+        { id: 'sco_del', name: 'Dschubba', bayer: 'δ Sco', con: 'Scorpius', ra: 16.0056, dec: -22.6217, mag: 2.29, spec: 'B0.3IV', dist: '490 ly', age: '~10 million years' },
+        { id: 'sco_eps', name: 'Larawag', bayer: 'ε Sco', con: 'Scorpius', ra: 16.8361, dec: -34.2932, mag: 2.29, spec: 'K1III', dist: '64 ly', age: '~2.5 billion years' },
+        { id: 'sco_bet', name: 'Acrab', bayer: 'β Sco', con: 'Scorpius', ra: 16.0906, dec: -19.8055, mag: 2.56, spec: 'B1V', dist: '404 ly', age: '~10 million years' },
+        { id: 'sco_kap', name: 'Girtab', bayer: 'κ Sco', con: 'Scorpius', ra: 17.7082, dec: -39.0300, mag: 2.39, spec: 'B1.5III', dist: '480 ly', age: '~14 million years' },
+
+        // SAGITTARIUS (Teapot toward Galactic Center)
+        { id: 'sgr_eps', name: 'Kaus Australis', bayer: 'ε Sgr', con: 'Sagittarius', ra: 18.4029, dec: -34.3846, mag: 1.79, spec: 'B9.5III', dist: '143 ly', age: '~230 million years' },
+        { id: 'sgr_sig', name: 'Nunki', bayer: 'σ Sgr', con: 'Sagittarius', ra: 18.9211, dec: -26.2967, mag: 2.05, spec: 'B2.5V', dist: '228 ly', age: '~31 million years' },
+        { id: 'sgr_zet', name: 'Ascella', bayer: 'ζ Sgr', con: 'Sagittarius', ra: 19.0435, dec: -29.8801, mag: 2.60, spec: 'A2.5V', dist: '88 ly', age: '~500 million years' },
+        { id: 'sgr_del', name: 'Kaus Media', bayer: 'δ Sgr', con: 'Sagittarius', ra: 18.3499, dec: -29.8281, mag: 2.72, spec: 'K3III', dist: '348 ly', age: '~260 million years' },
+        { id: 'sgr_lam', name: 'Kaus Borealis', bayer: 'λ Sgr', con: 'Sagittarius', ra: 18.4660, dec: -25.4217, mag: 2.82, spec: 'K1III', dist: '78 ly', age: '~1.2 billion years' },
+        { id: 'sgr_gam', name: 'Alnasl', bayer: 'γ Sgr', con: 'Sagittarius', ra: 18.0968, dec: -30.4241, mag: 2.98, spec: 'K0III', dist: '97 ly', age: '~1.6 billion years (spout of the Teapot pointing at the Galactic Center)' },
+        { id: 'sgr_phi', name: 'Phi Sgr', bayer: 'φ Sgr', con: 'Sagittarius', ra: 18.7609, dec: -26.9908, mag: 3.17, spec: 'B8III', dist: '239 ly', age: '~150 million years' },
+
+        // PEGASUS (Great Square)
+        { id: 'peg_eps', name: 'Enif', bayer: 'ε Peg', con: 'Pegasus', ra: 21.7364, dec: 9.8750, mag: 2.38, spec: 'K2I', dist: '690 ly', age: '~20 million years' },
+        { id: 'peg_bet', name: 'Scheat', bayer: 'β Peg', con: 'Pegasus', ra: 23.0629, dec: 28.0828, mag: 2.44, spec: 'M2.5II', dist: '196 ly', age: '~1.3 billion years' },
+        { id: 'peg_alp', name: 'Markab', bayer: 'α Peg', con: 'Pegasus', ra: 23.0793, dec: 15.2053, mag: 2.49, spec: 'B9III', dist: '133 ly', age: '~200 million years' },
+        { id: 'peg_gam', name: 'Algenib', bayer: 'γ Peg', con: 'Pegasus', ra: 0.2206, dec: 15.1836, mag: 2.83, spec: 'B2IV', dist: '390 ly', age: '~19 million years' },
+
+        // ANDROMEDA
+        { id: 'and_alp', name: 'Alpheratz', bayer: 'α And', con: 'Andromeda', ra: 0.1398, dec: 29.0904, mag: 2.07, spec: 'B8IV', dist: '97 ly', age: '~60 million years (shared corner of the Great Square of Pegasus)' },
+        { id: 'and_bet', name: 'Mirach', bayer: 'β And', con: 'Andromeda', ra: 1.1622, dec: 35.6206, mag: 2.07, spec: 'M0III', dist: '197 ly', age: '~1.8 billion years (guide star to Andromeda Galaxy M31)' },
+        { id: 'and_gam', name: 'Almach', bayer: 'γ And', con: 'Andromeda', ra: 2.0650, dec: 42.3297, mag: 2.10, spec: 'K3II', dist: '355 ly', age: '~6.5 million years' },
+        { id: 'and_del', name: 'Delta And', bayer: 'δ And', con: 'Andromeda', ra: 0.6554, dec: 30.8610, mag: 3.27, spec: 'K3III', dist: '105 ly', age: '~3.2 billion years' },
+
+        // PERSEUS
+        { id: 'per_alp', name: 'Mirfak', bayer: 'α Per', con: 'Perseus', ra: 3.4054, dec: 49.8612, mag: 1.79, spec: 'F5I', dist: '510 ly', age: '~41 million years' },
+        { id: 'per_bet', name: 'Algol', bayer: 'β Per', con: 'Perseus', ra: 3.1361, dec: 40.9556, mag: 2.12, spec: 'B8V', dist: '90 ly', age: '~570 million years (famous eclipsing “Demon Star” — dims every 2.87 days)' },
+        { id: 'per_zet', name: 'Atik', bayer: 'ζ Per', con: 'Perseus', ra: 3.9022, dec: 31.8836, mag: 2.85, spec: 'B1I', dist: '750 ly', age: '~12.6 million years' },
+        { id: 'per_eps', name: 'Epsilon Per', bayer: 'ε Per', con: 'Perseus', ra: 3.9643, dec: 40.0102, mag: 2.90, spec: 'B0.5V', dist: '640 ly', age: '~10 million years' },
+        { id: 'per_gam', name: 'Gamma Per', bayer: 'γ Per', con: 'Perseus', ra: 3.0799, dec: 53.5064, mag: 2.91, spec: 'G8III', dist: '243 ly', age: '~1.9 billion years' },
+        { id: 'per_del', name: 'Delta Per', bayer: 'δ Per', con: 'Perseus', ra: 3.7153, dec: 47.7875, mag: 3.01, spec: 'B5III', dist: '520 ly', age: '~6.8 million years' },
+
+        // CRUX (Southern Cross — great for Southern Hemisphere / See-Through-Earth!)
+        { id: 'cru_alp', name: 'Acrux', bayer: 'α Cru', con: 'Crux', ra: 12.4433, dec: -63.0991, mag: 0.77, spec: 'B0.5IV', dist: '321 ly', age: '~10–20 million years (brightest star in the Southern Cross)' },
+        { id: 'cru_bet', name: 'Mimosa', bayer: 'β Cru', con: 'Crux', ra: 12.7954, dec: -59.6888, mag: 1.25, spec: 'B0.5III', dist: '280 ly', age: '~8–11 million years' },
+        { id: 'cru_gam', name: 'Gacrux', bayer: 'γ Cru', con: 'Crux', ra: 12.5194, dec: -57.1132, mag: 1.59, spec: 'M3.5III', dist: '89 ly', age: '~2.5 billion years' },
+        { id: 'cru_del', name: 'Imai', bayer: 'δ Cru', con: 'Crux', ra: 12.2524, dec: -58.7489, mag: 2.79, spec: 'B2IV', dist: '345 ly', age: '~18 million years' }
+      ];
+
+      const STAR_MAP = Object.fromEntries(STARS.map(s => [s.id, s]));
+
+      const CONSTELLATIONS = [
+        { name: 'Orion', tag: 'The Hunter', ra: 5.59, dec: 1.5, lines: [['ori_lam','ori_alp'],['ori_lam','ori_gam'],['ori_alp','ori_gam'],['ori_alp','ori_zet'],['ori_gam','ori_del'],['ori_del','ori_eps'],['ori_eps','ori_zet'],['ori_del','ori_bet'],['ori_zet','ori_kap'],['ori_bet','ori_kap']] },
+        { name: 'Ursa Major', tag: 'Big Dipper', ra: 12.1, dec: 56.5, lines: [['uma_alp','uma_bet'],['uma_bet','uma_gam'],['uma_gam','uma_del'],['uma_del','uma_alp'],['uma_del','uma_eps'],['uma_eps','uma_zet'],['uma_zet','uma_eta']] },
+        { name: 'Ursa Minor', tag: 'Little Dipper', ra: 15.5, dec: 79.0, lines: [['umi_alp','umi_del'],['umi_del','umi_eps'],['umi_eps','umi_zet'],['umi_zet','umi_bet'],['umi_bet','umi_gam'],['umi_gam','umi_eta'],['umi_eta','umi_zet']] },
+        { name: 'Cassiopeia', tag: 'The Queen', ra: 1.0, dec: 60.0, lines: [['cas_bet','cas_alp'],['cas_alp','cas_gam'],['cas_gam','cas_del'],['cas_del','cas_eps']] },
+        { name: 'Cygnus', tag: 'Northern Cross', ra: 20.3, dec: 40.0, lines: [['cyg_alp','cyg_gam'],['cyg_gam','cyg_bet'],['cyg_del','cyg_gam'],['cyg_gam','cyg_eps']] },
+        { name: 'Lyra', tag: 'The Harp', ra: 18.8, dec: 35.5, lines: [['lyr_alp','lyr_zet'],['lyr_zet','lyr_del'],['lyr_del','lyr_gam'],['lyr_gam','lyr_bet'],['lyr_bet','lyr_zet']] },
+        { name: 'Aquila', tag: 'The Eagle', ra: 19.6, dec: 8.5, lines: [['aql_gam','aql_alp'],['aql_alp','aql_bet'],['aql_alp','aql_del'],['aql_del','aql_zet'],['aql_del','aql_lam']] },
+        { name: 'Taurus', tag: 'The Bull', ra: 4.7, dec: 19.0, lines: [['tau_bet','tau_eps'],['tau_eps','tau_gam'],['tau_gam','tau_alp'],['tau_alp','tau_zet'],['tau_eps','tau_eta']] },
+        { name: 'Gemini', tag: 'The Twins', ra: 7.1, dec: 24.0, lines: [['gem_alp','gem_bet'],['gem_alp','gem_eps'],['gem_eps','gem_mu'],['gem_bet','gem_del'],['gem_del','gem_gam']] },
+        { name: 'Canis Major', tag: 'Great Dog', ra: 6.9, dec: -22.5, lines: [['cma_bet','cma_alp'],['cma_alp','cma_del'],['cma_del','cma_eps'],['cma_del','cma_eta']] },
+        { name: 'Canis Minor', tag: 'Little Dog', ra: 7.45, dec: 10.2, lines: [['cmi_alp','cmi_bet']] },
+        { name: 'Auriga', tag: 'The Charioteer', ra: 5.5, dec: 40.5, lines: [['aur_alp','aur_bet'],['aur_bet','aur_the'],['aur_the','tau_bet'],['tau_bet','aur_iot'],['aur_iot','aur_alp']] },
+        { name: 'Leo', tag: 'The Lion', ra: 10.7, dec: 17.5, lines: [['leo_eps','leo_zet'],['leo_zet','leo_gam'],['leo_gam','leo_eta'],['leo_eta','leo_alp'],['leo_gam','leo_del'],['leo_del','leo_bet'],['leo_bet','leo_the'],['leo_the','leo_alp']] },
+        { name: 'Boötes', tag: 'The Herdsman', ra: 14.6, dec: 28.0, lines: [['boo_alp','boo_eta'],['boo_alp','boo_eps'],['boo_eps','boo_del'],['boo_del','boo_bet'],['boo_bet','boo_gam'],['boo_gam','boo_alp']] },
+        { name: 'Virgo', tag: 'The Maiden', ra: 13.1, dec: -1.0, lines: [['vir_eps','vir_del'],['vir_del','vir_gam'],['vir_gam','vir_alp'],['vir_alp','vir_zet'],['vir_zet','vir_eps']] },
+        { name: 'Scorpius', tag: 'The Scorpion', ra: 16.9, dec: -31.0, lines: [['sco_bet','sco_del'],['sco_del','sco_alp'],['sco_alp','sco_eps'],['sco_eps','sco_the'],['sco_the','sco_kap'],['sco_kap','sco_lam']] },
+        { name: 'Sagittarius', tag: 'The Teapot', ra: 18.6, dec: -29.0, lines: [['sgr_gam','sgr_del'],['sgr_del','sgr_eps'],['sgr_eps','sgr_zet'],['sgr_zet','sgr_sig'],['sgr_sig','sgr_phi'],['sgr_phi','sgr_lam'],['sgr_lam','sgr_del'],['sgr_phi','sgr_del'],['sgr_phi','sgr_zet']] },
+        { name: 'Pegasus', tag: 'Great Square', ra: 23.1, dec: 20.0, lines: [['peg_alp','peg_bet'],['peg_bet','and_alp'],['and_alp','peg_gam'],['peg_gam','peg_alp'],['peg_alp','peg_eps']] },
+        { name: 'Andromeda', tag: 'Chained Princess', ra: 1.1, dec: 35.0, lines: [['and_alp','and_del'],['and_del','and_bet'],['and_bet','and_gam']] },
+        { name: 'Perseus', tag: 'The Hero', ra: 3.5, dec: 44.0, lines: [['per_gam','per_alp'],['per_alp','per_del'],['per_del','per_eps'],['per_eps','per_zet'],['per_alp','per_bet']] },
+        { name: 'Crux', tag: 'Southern Cross', ra: 12.5, dec: -60.0, lines: [['cru_alp','cru_gam'],['cru_bet','cru_del']] }
+      ];
+
+      // Iconic Messier Deep Sky Objects (revealed in low-Bortle dark skies!)
+      const DSOS = [
+        { id: 'dso_m42', name: 'Orion Nebula (M42)', con: 'Orion', ra: 5.5881, dec: -5.3911, mag: 4.0, spec: 'Nebula', dist: '1,344 ly', color: '#f472b6', size: 1.1, age: 'Active stellar nursery (~1–3 million years old) birthing thousands of new stars' },
+        { id: 'dso_m31', name: 'Andromeda Galaxy (M31)', con: 'Andromeda', ra: 0.7123, dec: 41.2687, mag: 3.4, spec: 'Spiral Galaxy', dist: '2.5M ly', color: '#fde68a', size: 1.8, age: '~10 billion years old — farthest object visible to the unaided human eye!' },
+        { id: 'dso_m45', name: 'Pleiades (M45)', con: 'Taurus', ra: 3.7833, dec: 24.1167, mag: 1.6, spec: 'Open Cluster', dist: '444 ly', color: '#93c5fd', size: 1.2, age: '~100 million years old (Seven Sisters star cluster)' },
+        { id: 'dso_m8', name: 'Lagoon Nebula (M8)', con: 'Sagittarius', ra: 18.0600, dec: -24.3867, mag: 6.0, spec: 'Nebula', dist: '4,100 ly', color: '#fb7185', size: 1.0, age: '~2 million years old — giant interstellar emission cloud' },
+        { id: 'dso_m13', name: 'Hercules Cluster (M13)', con: 'Hercules', ra: 16.6949, dec: 36.4613, mag: 5.8, spec: 'Globular Cluster', dist: '22,200 ly', color: '#fef08a', size: 0.85, age: '~11.6 billion years old (300,000+ ancient stars packed together)' },
+        { id: 'dso_m57', name: 'Ring Nebula (M57)', con: 'Lyra', ra: 18.8931, dec: 33.0292, mag: 8.8, spec: 'Planetary Nebula', dist: '2,567 ly', color: '#67e8f9', size: 0.7, age: '~4,000 years since outer shell ejection (younger than the Great Pyramid!)' }
+      ];
+
+      // Deterministic PRNG for realistic Bortle-1 faint field stars & Milky Way knots
+      function mulberry32(seed) {
+        let a = seed >>> 0;
+        return function() {
+          a |= 0; a = (a + 0x6D2B79F5) | 0;
+          let t = Math.imul(a ^ (a >>> 15), 1 | a);
+          t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+          return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+        };
+      }
+
+      const rand = mulberry32(20261121);
+      const FIELD_STARS = [];
+      const specKeys = ['B','A','F','G','K','M'];
+      for (let i = 0; i < 1350; i++) {
+        const ra = rand() * 24;
+        const u = rand() * 2 - 1;
+        const dec = Math.asin(u) * (180 / Math.PI);
+        // Magnitude distribution weighted toward fainter stars (3.5 to 6.8)
+        const mag = 3.5 + Math.pow(rand(), 0.58) * 3.3;
+        const spec = specKeys[Math.floor(rand() * specKeys.length)];
+        FIELD_STARS.push({ ra, dec, mag, color: SPECTRAL_COLORS[spec] });
+      }
+
+      // Milky Way galactic plane points converted from Galactic (l, b) -> Equatorial (RA, Dec)
+      const DEG = Math.PI / 180;
+      const RAD = 180 / Math.PI;
+      const GAL_NGP_RA = 192.85948 * DEG;
+      const GAL_NGP_DEC = 27.12825 * DEG;
+      const GAL_LON_NCP = 122.93192 * DEG;
+
+      function galacticToEquatorial(lDeg, bDeg) {
+        const l = lDeg * DEG;
+        const b = bDeg * DEG;
+        const sinDec = Math.sin(b) * Math.sin(GAL_NGP_DEC) + Math.cos(b) * Math.cos(GAL_NGP_DEC) * Math.cos(GAL_LON_NCP - l);
+        const dec = Math.asin(Math.max(-1, Math.min(1, sinDec)));
+        const y = Math.cos(b) * Math.sin(GAL_LON_NCP - l);
+        const x = Math.sin(b) * Math.cos(GAL_NGP_DEC) - Math.cos(b) * Math.sin(GAL_NGP_DEC) * Math.cos(GAL_LON_NCP - l);
+        let ra = (Math.atan2(y, x) + GAL_NGP_RA) * RAD;
+        ra = ((ra % 360) + 360) % 360;
+        return { ra: ra / 15, dec: dec * RAD };
+      }
+
+      const MILKY_WAY_KNOTS = [];
+      for (let i = 0; i < 340; i++) {
+        const l = rand() * 360;
+        // Gaussian-like spread around galactic equator b = 0
+        const b = (rand() + rand() + rand() - 1.5) * 9.5;
+        const eq = galacticToEquatorial(l, b);
+        // Brighter near Galactic Center (l ~ 0 or 360) and Cygnus (l ~ 75)
+        const distCenter = Math.min(l, 360 - l);
+        const coreBoost = Math.exp(-(distCenter * distCenter) / (2 * 45 * 45));
+        const cygBoost = 0.55 * Math.exp(-((l - 78) * (l - 78)) / (2 * 28 * 28));
+        const intensity = 0.25 + 0.75 * Math.max(coreBoost, cygBoost) * Math.exp(-(b * b) / 60);
+        const radiusDeg = 3.2 + rand() * 5.2;
+        MILKY_WAY_KNOTS.push({ ra: eq.ra, dec: eq.dec, intensity, radiusDeg, warm: coreBoost > 0.45 });
+      }
+
+      // =========================================================================
+      // 2. ASTRONOMICAL MATH ENGINE (JD, GMST, LST, Alt/Az, Solar Position)
+      // =========================================================================
+      function getJulianDate(date) {
+        return date.getTime() / 86400000 + 2440587.5;
+      }
+
+      function getLSTDeg(jd, lonDeg) {
+        const d = jd - 2451545.0;
+        const t = d / 36525.0;
+        let gmst = 280.46061837 + 360.98564736629 * d + 0.000387933 * t * t;
+        gmst = ((gmst % 360) + 360) % 360;
+        return ((gmst + lonDeg) % 360 + 360) % 360;
+      }
+
+      function equatorialToHorizontal(raHours, decDeg, latDeg, lstDeg) {
+        const raDeg = raHours * 15;
+        const ha = (lstDeg - raDeg) * DEG;
+        const dec = decDeg * DEG;
+        const lat = latDeg * DEG;
+        const sinAlt = Math.sin(dec) * Math.sin(lat) + Math.cos(dec) * Math.cos(lat) * Math.cos(ha);
+        const alt = Math.asin(Math.max(-1, Math.min(1, sinAlt)));
+        const cosAlt = Math.cos(alt);
+        let az = 0;
+        if (Math.abs(cosAlt * Math.cos(lat)) > 1e-6) {
+          const cosAz = (Math.sin(dec) - Math.sin(alt) * Math.sin(lat)) / (cosAlt * Math.cos(lat));
+          az = Math.acos(Math.max(-1, Math.min(1, cosAz)));
+          if (Math.sin(ha) > 0) az = 2 * Math.PI - az;
+        }
+        return { alt: alt * RAD, az: az * RAD };
+      }
+
+      function getSunEquatorial(jd) {
+        const n = jd - 2451545.0;
+        const L = ((280.460 + 0.9856474 * n) % 360 + 360) % 360;
+        const g = ((357.528 + 0.9856003 * n) % 360 + 360) % 360;
+        const lambda = (L + 1.915 * Math.sin(g * DEG) + 0.020 * Math.sin(2 * g * DEG)) * DEG;
+        const eps = (23.439 - 0.0000004 * n) * DEG;
+        const ra = Math.atan2(Math.cos(eps) * Math.sin(lambda), Math.cos(lambda));
+        const dec = Math.asin(Math.sin(eps) * Math.sin(lambda));
+        return {
+          ra: (((ra * RAD) % 360) + 360) % 360 / 15,
+          dec: dec * RAD
+        };
+      }
+
+      function formatHMS(hours) {
+        const h = Math.floor(hours);
+        const mFloat = (hours - h) * 60;
+        const m = Math.floor(mFloat);
+        const s = Math.floor((mFloat - m) * 60);
+        return `${String(h).padStart(2, '0')}h ${String(m).padStart(2, '0')}m ${String(s).padStart(2, '0')}s`;
+      }
+
+      function compassDir(az) {
+        const dirs = ['N','NE','E','SE','S','SW','W','NW'];
+        return dirs[Math.round((((az % 360) + 360) % 360) / 45) % 8];
+      }
+
+      // =========================================================================
+      // 3. APPLICATION STATE
+      // =========================================================================
+      const state = {
+        lat: 40.4444,
+        lon: -74.3818,
+        locName: 'South River, NJ',
+        // Camera look angles
+        viewAz: 165,
+        viewAlt: 32,
+        targetAz: null,
+        targetAlt: null,
+        fov: 68,
+        // Sky clarity / pollution controls
+        bortle: 1,
+        stripDaylight: true,
+        // Toggles
+        showLines: true,
+        showLabels: true,
+        showGrid: false,
+        showGround: true,
+        showMilkyWay: true,
+        showDSO: true,
+        nightVision: false,
+        autoScan: false,
+        // Camera AR & Gyro
+        cameraActive: false,
+        cameraStream: null,
+        camOpacity: 0.85,
+        gyroActive: false,
+        // Time
+        timeOffsetHours: 0,
+        customBaseTimeMs: null,
+        timePlaying: false,
+        timeSpeed: 600,
+        lastFrameMs: performance.now(),
+        // Selection
+        selectedObj: null,
+        // Audio (silent 0 dB default)
+        audioActive: false,
+        audioCtx: null,
+        audioGain: null,
+        // Drawer state (auto-collapsed on narrow mobile screens)
+        drawerOpen: window.innerWidth >= 900,
+        activeTab: 'finder',
+        searchQuery: '',
+        // Computed screen positions for hit-testing
+        projectedObjects: []
+      };
+
+      // Load saved preferences safely
+      try {
+        const saved = localStorage.getItem('hawkskies_prefs_v1');
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (typeof parsed.lat === 'number' && typeof parsed.lon === 'number') {
+            state.lat = parsed.lat;
+            state.lon = parsed.lon;
+            state.locName = parsed.locName || 'Saved Location';
+          }
+        }
+      } catch (_) {}
+
+      function savePrefs() {
+        try {
+          localStorage.setItem('hawkskies_prefs_v1', JSON.stringify({
+            lat: state.lat,
+            lon: state.lon,
+            locName: state.locName
+          }));
+        } catch (_) {}
+      }
+
+      // =========================================================================
+      // 4. DOM REFERENCES
+      // =========================================================================
+      const els = {
+        canvas: document.getElementById('skyCanvas'),
+        video: document.getElementById('cameraVideo'),
+        toastBox: document.getElementById('toastBox'),
+        skyStateBadge: document.getElementById('skyStateBadge'),
+        telemetrySub: document.getElementById('telemetrySub'),
+        hudAzAlt: document.getElementById('hudAzAlt'),
+        hudLST: document.getElementById('hudLST'),
+        hudSunAlt: document.getElementById('hudSunAlt'),
+        btnCameraAR: document.getElementById('btnCameraAR'),
+        btnGyro: document.getElementById('btnGyro'),
+        btnGPS: document.getElementById('btnGPS'),
+        btnToggleDrawer: document.getElementById('btnToggleDrawer'),
+        skyDrawer: document.getElementById('skyDrawer'),
+        tabFinder: document.getElementById('tabFinder'),
+        tabLocation: document.getElementById('tabLocation'),
+        tabOptics: document.getElementById('tabOptics'),
+        paneFinder: document.getElementById('paneFinder'),
+        paneLocation: document.getElementById('paneLocation'),
+        paneOptics: document.getElementById('paneOptics'),
+        inputSearch: document.getElementById('inputSearch'),
+        visibleCountLabel: document.getElementById('visibleCountLabel'),
+        btnAutoScan: document.getElementById('btnAutoScan'),
+        constellationList: document.getElementById('constellationList'),
+        inputLat: document.getElementById('inputLat'),
+        inputLon: document.getElementById('inputLon'),
+        btnApplyCoords: document.getElementById('btnApplyCoords'),
+        btnGPSDrawer: document.getElementById('btnGPSDrawer'),
+        presetSouthRiver: document.getElementById('presetSouthRiver'),
+        presetCherrySprings: document.getElementById('presetCherrySprings'),
+        presetMaunaKea: document.getElementById('presetMaunaKea'),
+        presetJoshuaTree: document.getElementById('presetJoshuaTree'),
+        presetNaturalBridges: document.getElementById('presetNaturalBridges'),
+        presetCerroPachon: document.getElementById('presetCerroPachon'),
+        btnTimeNow: document.getElementById('btnTimeNow'),
+        clockReadout: document.getElementById('clockReadout'),
+        sliderTimeOffset: document.getElementById('sliderTimeOffset'),
+        timeOffsetLabel: document.getElementById('timeOffsetLabel'),
+        btnTimePlay: document.getElementById('btnTimePlay'),
+        selectTimeSpeed: document.getElementById('selectTimeSpeed'),
+        inputDateTime: document.getElementById('inputDateTime'),
+        sliderFOV: document.getElementById('sliderFOV'),
+        fovReadout: document.getElementById('fovReadout'),
+        sliderCamOpacity: document.getElementById('sliderCamOpacity'),
+        camOpacityReadout: document.getElementById('camOpacityReadout'),
+        btnToggleGrid: document.getElementById('btnToggleGrid'),
+        btnToggleGround: document.getElementById('btnToggleGround'),
+        btnToggleMilkyWay: document.getElementById('btnToggleMilkyWay'),
+        btnToggleDSO: document.getElementById('btnToggleDSO'),
+        btnToggleNightVision: document.getElementById('btnToggleNightVision'),
+        btnAudio: document.getElementById('btnAudio'),
+        btnExportHTML: document.getElementById('btnExportHTML'),
+        inspectorCard: document.getElementById('inspectorCard'),
+        inspDot: document.getElementById('inspDot'),
+        inspName: document.getElementById('inspName'),
+        inspSub: document.getElementById('inspSub'),
+        inspMag: document.getElementById('inspMag'),
+        inspDist: document.getElementById('inspDist'),
+        inspSpec: document.getElementById('inspSpec'),
+        inspAltAz: document.getElementById('inspAltAz'),
+        inspRaDec: document.getElementById('inspRaDec'),
+        inspAgeText: document.getElementById('inspAgeText'),
+        btnCenterSelected: document.getElementById('btnCenterSelected'),
+        btnCloseInspector: document.getElementById('btnCloseInspector'),
+        sliderBortle: document.getElementById('sliderBortle'),
+        bortleLabel: document.getElementById('bortleLabel'),
+        btnToggleDaylight: document.getElementById('btnToggleDaylight'),
+        btnToggleLines: document.getElementById('btnToggleLines'),
+        btnToggleLabels: document.getElementById('btnToggleLabels'),
+        btnZoomIn: document.getElementById('btnZoomIn'),
+        btnZoomOut: document.getElementById('btnZoomOut')
+      };
+
+      const ctx = els.canvas.getContext('2d');
+      let toastTimer = null;
+
+      function showToast(msg, duration = 3200) {
+        els.toastBox.textContent = msg;
+        els.toastBox.classList.add('show');
+        clearTimeout(toastTimer);
+        toastTimer = setTimeout(() => {
+          els.toastBox.classList.remove('show');
+        }, duration);
+      }
+
+      // =========================================================================
+      // 5. CAMERA PROJECTION (3D Celestial Unit Sphere -> Screen XY)
+      // =========================================================================
+      function altAzToVec(altDeg, azDeg) {
+        const alt = altDeg * DEG;
+        const az = azDeg * DEG;
+        const cosAlt = Math.cos(alt);
+        return [
+          cosAlt * Math.sin(az), // East (+X)
+          cosAlt * Math.cos(az), // North (+Y)
+          Math.sin(alt)          // Zenith (+Z)
+        ];
+      }
+
+      function buildCameraBasis(viewAzDeg, viewAltDeg) {
+        const fwd = altAzToVec(viewAltDeg, viewAzDeg);
+        // Right vector = normalize(cross(fwd, worldUp)) -> horizontal right on screen
+        const azRad = viewAzDeg * DEG;
+        const right = [Math.cos(azRad), -Math.sin(azRad), 0];
+        // Up vector = cross(right, fwd)
+        const up = [
+          right[1] * fwd[2] - right[2] * fwd[1],
+          right[2] * fwd[0] - right[0] * fwd[2],
+          right[0] * fwd[1] - right[1] * fwd[0]
+        ];
+        return { fwd, right, up };
+      }
+
+      function projectPoint(altDeg, azDeg, basis, width, height, focalLen) {
+        const v = altAzToVec(altDeg, azDeg);
+        const z = v[0] * basis.fwd[0] + v[1] * basis.fwd[1] + v[2] * basis.fwd[2];
+        if (z <= -0.15) return null; // Behind camera
+        const x = v[0] * basis.right[0] + v[1] * basis.right[1] + v[2] * basis.right[2];
+        const y = v[0] * basis.up[0] + v[1] * basis.up[1] + v[2] * basis.up[2];
+        // Stereographic-blended projection for smooth wide-angle rendering without edge distortion
+        const denom = Math.max(0.18, 0.55 * z + 0.45);
+        const sx = width * 0.5 + (x / denom) * focalLen;
+        const sy = height * 0.5 - (y / denom) * focalLen;
+        return { x: sx, y: sy, z };
+      }
+
+      // =========================================================================
+      // 6. TIME, GPS, CAMERA AR, GYRO & AUDIO HANDLERS
+      // =========================================================================
+      function getSimDate() {
+        const base = state.customBaseTimeMs !== null ? state.customBaseTimeMs : Date.now();
+        return new Date(base + state.timeOffsetHours * 3600000);
+      }
+
+      function requestGPS() {
+        if (!navigator.geolocation) {
+          showToast('GPS geolocation is unavailable in this browser. Enter coordinates in Sky Lab.');
+          return;
+        }
+        showToast('Acquiring GPS lock...');
+        navigator.geolocation.getCurrentPosition(
+          (pos) => {
+            state.lat = Number(pos.coords.latitude.toFixed(4));
+            state.lon = Number(pos.coords.longitude.toFixed(4));
+            state.locName = 'Live GPS Lock';
+            els.inputLat.value = state.lat;
+            els.inputLon.value = state.lon;
+            savePrefs();
+            updateTelemetryLabels();
+            renderConstellationList();
+            showToast(`GPS locked: ${state.lat.toFixed(3)}°, ${state.lon.toFixed(3)}°`);
+          },
+          () => {
+            showToast('GPS permission denied or unavailable. Using selected coordinates.');
+          },
+          { enableHighAccuracy: true, timeout: 8000 }
+        );
+      }
+
+      async function toggleCameraAR() {
+        if (state.cameraActive) {
+          if (state.cameraStream) {
+            state.cameraStream.getTracks().forEach(t => t.stop());
+            state.cameraStream = null;
+          }
+          els.video.srcObject = null;
+          els.video.classList.remove('active');
+          state.cameraActive = false;
+          els.btnCameraAR.classList.remove('active');
+          showToast('Camera AR closed — back to Pure Dark-Sky Canvas.');
+          return;
+        }
+
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+          showToast('Camera access requires HTTPS or a device with a camera. Use drag/gyro to explore!');
+          return;
+        }
+
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: { ideal: 'environment' } },
+            audio: false
+          });
+          state.cameraStream = stream;
+          els.video.srcObject = stream;
+          await els.video.play();
+          els.video.classList.add('active');
+          state.cameraActive = true;
+          els.btnCameraAR.classList.add('active');
+          showToast('Camera AR active! Move your device or drag to align constellations.');
+          if (!state.gyroActive && typeof DeviceOrientationEvent !== 'undefined') {
+            enableGyro(true);
+          }
+        } catch (err) {
+          showToast('Camera permission blocked or no camera detected. Drag or use Auto-Scan to explore the sky.');
+        }
+      }
+
+      function handleOrientation(e) {
+        if (!state.gyroActive) return;
+        let heading = null;
+        if (typeof e.webkitCompassHeading === 'number' && !isNaN(e.webkitCompassHeading)) {
+          heading = e.webkitCompassHeading;
+        } else if (typeof e.alpha === 'number' && !isNaN(e.alpha)) {
+          heading = (360 - e.alpha) % 360;
+        }
+        if (heading === null || typeof e.beta !== 'number' || isNaN(e.beta)) return;
+
+        // Holding phone upright: beta ~ 90 => horizon (0 deg), beta ~ 180 => zenith (+90 deg)
+        const targetAlt = Math.max(-85, Math.min(89, e.beta - 90));
+        // Smooth shortest-angle interpolation for azimuth
+        let diff = ((heading - state.viewAz + 540) % 360) - 180;
+        state.viewAz = (state.viewAz + diff * 0.22 + 360) % 360;
+        state.viewAlt = state.viewAlt + (targetAlt - state.viewAlt) * 0.22;
+        state.targetAz = null;
+        state.targetAlt = null;
+      }
+
+      async function enableGyro(silent = false) {
+        if (state.gyroActive) {
+          state.gyroActive = false;
+          window.removeEventListener('deviceorientationabsolute', handleOrientation, true);
+          window.removeEventListener('deviceorientation', handleOrientation, true);
+          els.btnGyro.classList.remove('active');
+          if (!silent) showToast('Motion tracking disabled — manual drag active.');
+          return;
+        }
+
+        if (typeof DeviceOrientationEvent === 'undefined') {
+          if (!silent) showToast('Motion sensors not available on this device. Drag or use arrow keys to pan.');
+          return;
+        }
+
+        try {
+          if (typeof DeviceOrientationEvent.requestPermission === 'function') {
+            const resp = await DeviceOrientationEvent.requestPermission();
+            if (resp !== 'granted') {
+              if (!silent) showToast('Motion sensor permission denied.');
+              return;
+            }
+          }
+          state.gyroActive = true;
+          state.autoScan = false;
+          els.btnAutoScan.textContent = 'Auto-Scan: OFF';
+          window.addEventListener('deviceorientationabsolute', handleOrientation, true);
+          window.addEventListener('deviceorientation', handleOrientation, true);
+          els.btnGyro.classList.add('active');
+          if (!silent) showToast('Motion & compass tracking active — point your device at the sky!');
+        } catch (_) {
+          if (!silent) showToast('Could not activate motion sensors. Drag to pan the sky.');
+        }
+      }
+
+      function toggleAudio() {
+        if (state.audioActive) {
+          if (state.audioGain && state.audioCtx) {
+            state.audioGain.gain.setTargetAtTime(0.0001, state.audioCtx.currentTime, 0.25);
+          }
+          state.audioActive = false;
+          els.btnAudio.classList.remove('active');
+          els.btnAudio.textContent = 'Space Synth: OFF';
+          return;
+        }
+        try {
+          const AudioCtx = window.AudioContext || window.webkitAudioContext;
+          if (!state.audioCtx) {
+            state.audioCtx = new AudioCtx();
+            const master = state.audioCtx.createGain();
+            master.gain.value = 0.0001;
+            const filter = state.audioCtx.createBiquadFilter();
+            filter.type = 'lowpass';
+            filter.frequency.value = 420;
+            filter.connect(master);
+            master.connect(state.audioCtx.destination);
+            // Warm celestial fifth chord (D2, A2, F#3)
+            [73.42, 110.0, 185.0].forEach((freq, idx) => {
+              const osc = state.audioCtx.createOscillator();
+              osc.type = idx === 0 ? 'sine' : 'triangle';
+              osc.frequency.value = freq;
+              const g = state.audioCtx.createGain();
+              g.gain.value = idx === 0 ? 0.45 : 0.18;
+              osc.connect(g);
+              g.connect(filter);
+              osc.start();
+            });
+            state.audioGain = master;
+          }
+          if (state.audioCtx.state === 'suspended') state.audioCtx.resume();
+          state.audioGain.gain.setTargetAtTime(0.08, state.audioCtx.currentTime, 0.4);
+          state.audioActive = true;
+          els.btnAudio.classList.add('active');
+          els.btnAudio.textContent = 'Space Synth: ON';
+        } catch (_) {
+          showToast('WebAudio unavailable in this browser.');
+        }
+      }
+
+      function exportSelfContainedHTML() {
+        const html = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
+        const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'hawkskies.html';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+        showToast('Downloaded hawkskies.html — open on mobile over HTTPS for live GPS & Camera AR!');
+      }
+
+      // =========================================================================
+      // 7. UI SYNC & CONSTELLATION FINDER
+      // =========================================================================
+      function updateTelemetryLabels() {
+        const latStr = `${Math.abs(state.lat).toFixed(2)}°${state.lat >= 0 ? 'N' : 'S'}`;
+        const lonStr = `${Math.abs(state.lon).toFixed(2)}°${state.lon >= 0 ? 'E' : 'W'}`;
+        els.telemetrySub.textContent = `${state.locName} • ${latStr}, ${lonStr}`;
+      }
+
+      function setDrawerOpen(open) {
+        state.drawerOpen = open;
+        els.skyDrawer.classList.toggle('hidden', !open);
+        els.btnToggleDrawer.classList.toggle('active', open);
+      }
+
+      function setActiveTab(tab) {
+        state.activeTab = tab;
+        const tabs = [
+          { key: 'finder', btn: els.tabFinder, pane: els.paneFinder },
+          { key: 'location', btn: els.tabLocation, pane: els.paneLocation },
+          { key: 'optics', btn: els.tabOptics, pane: els.paneOptics }
+        ];
+        tabs.forEach(t => {
+          const isAct = t.key === tab;
+          t.pane.classList.toggle('hidden', !isAct);
+          t.btn.className = isAct
+            ? 'flex-1 py-1.5 text-xs font-semibold rounded-lg bg-sky-500/25 text-sky-200 border border-sky-400/40 cursor-pointer'
+            : 'flex-1 py-1.5 text-xs font-semibold rounded-lg text-slate-400 hover:text-white cursor-pointer';
+        });
+      }
+
+      function slewToRaDec(raHours, decDeg, label) {
+        const jd = getJulianDate(getSimDate());
+        const lst = getLSTDeg(jd, state.lon);
+        const pos = equatorialToHorizontal(raHours, decDeg, state.lat, lst);
+        state.targetAz = pos.az;
+        state.targetAlt = pos.alt;
+        state.autoScan = false;
+        els.btnAutoScan.textContent = 'Auto-Scan: OFF';
+        if (pos.alt < 0 && state.showGround) {
+          state.showGround = false;
+          els.btnToggleGround.classList.remove('active');
+          showToast(`${label} is currently below the horizon (${pos.alt.toFixed(0)}°). Horizon mask turned OFF so you can see through Earth!`);
+        } else {
+          showToast(`Centering on ${label} (${pos.alt >= 0 ? '+' : ''}${pos.alt.toFixed(0)}° alt, ${compassDir(pos.az)})`);
+        }
+      }
+
+      function openInspector(obj) {
+        state.selectedObj = obj;
+        els.inspectorCard.classList.remove('hidden');
+        els.inspDot.style.background = obj.color || SPECTRAL_COLORS[(obj.spec || 'A')[0]] || '#38bdf8';
+        els.inspName.textContent = obj.name;
+        els.inspSub.textContent = obj.bayer ? `${obj.bayer} • ${obj.con}` : `${obj.spec} • ${obj.con}`;
+        els.inspMag.textContent = typeof obj.mag === 'number' ? obj.mag.toFixed(2) : '--';
+        els.inspDist.textContent = obj.dist || '--';
+        els.inspSpec.textContent = obj.spec || '--';
+        els.inspAgeText.textContent = obj.age || 'Millions to billions of years old — far older than human history';
+        updateInspectorLiveCoords();
+      }
+
+      function updateInspectorLiveCoords() {
+        if (!state.selectedObj) return;
+        const jd = getJulianDate(getSimDate());
+        const lst = getLSTDeg(jd, state.lon);
+        const pos = equatorialToHorizontal(state.selectedObj.ra, state.selectedObj.dec, state.lat, lst);
+        els.inspAltAz.textContent = `${pos.alt >= 0 ? '+' : ''}${pos.alt.toFixed(1)}° / ${pos.az.toFixed(0)}° ${compassDir(pos.az)}`;
+        const raH = Math.floor(state.selectedObj.ra);
+        const raM = Math.floor((state.selectedObj.ra - raH) * 60);
+        els.inspRaDec.textContent = `${raH}h${String(raM).padStart(2,'0')}m / ${state.selectedObj.dec >= 0 ? '+' : ''}${state.selectedObj.dec.toFixed(1)}°`;
+      }
+
+      function renderConstellationList() {
+        const jd = getJulianDate(getSimDate());
+        const lst = getLSTDeg(jd, state.lon);
+        const q = state.searchQuery.trim().toLowerCase();
+
+        const items = CONSTELLATIONS.map(c => {
+          const pos = equatorialToHorizontal(c.ra, c.dec, state.lat, lst);
+          return { type: 'con', name: c.name, sub: c.tag, ra: c.ra, dec: c.dec, alt: pos.alt, az: pos.az };
+        });
+
+        // Also allow searching specific bright stars & DSOs when query is non-empty
+        if (q.length > 0) {
+          STARS.forEach(s => {
+            if (s.name.toLowerCase().includes(q) || s.con.toLowerCase().includes(q)) {
+              const pos = equatorialToHorizontal(s.ra, s.dec, state.lat, lst);
+              items.push({ type: 'star', name: s.name, sub: `Star • ${s.con}`, ra: s.ra, dec: s.dec, alt: pos.alt, az: pos.az, obj: s });
+            }
+          });
+          DSOS.forEach(d => {
+            if (d.name.toLowerCase().includes(q) || d.con.toLowerCase().includes(q)) {
+              const pos = equatorialToHorizontal(d.ra, d.dec, state.lat, lst);
+              items.push({ type: 'dso', name: d.name, sub: `${d.spec} • ${d.con}`, ra: d.ra, dec: d.dec, alt: pos.alt, az: pos.az, obj: d });
+            }
+          });
+        }
+
+        const filtered = items
+          .filter(it => !q || it.name.toLowerCase().includes(q) || it.sub.toLowerCase().includes(q))
+          .sort((a, b) => b.alt - a.alt);
+
+        const visibleCons = CONSTELLATIONS.filter(c => equatorialToHorizontal(c.ra, c.dec, state.lat, lst).alt > 0).length;
+        els.visibleCountLabel.textContent = `Above horizon: ${visibleCons} / ${CONSTELLATIONS.length}`;
+
+        els.constellationList.innerHTML = '';
+        if (filtered.length === 0) {
+          els.constellationList.innerHTML = '<div class="text-xs text-slate-400 text-center py-6">No matching sky objects found.</div>';
+          return;
+        }
+
+        filtered.forEach((it) => {
+          const btn = document.createElement('button');
+          btn.className = 'w-full flex items-center justify-between px-2.5 py-2 rounded-xl bg-slate-900/70 hover:bg-slate-800/90 border border-slate-700/60 hover:border-sky-400/50 transition text-left cursor-pointer';
+          const up = it.alt >= 0;
+          btn.innerHTML = `
+            <div>
+              <div class="text-xs font-semibold text-white">${it.name}</div>
+              <div class="text-[10px] text-slate-400">${it.sub}</div>
+            </div>
+            <div class="text-right mono">
+              <div class="text-[11px] font-semibold ${up ? 'text-emerald-300' : 'text-slate-500'}">${up ? '+' : ''}${it.alt.toFixed(0)}° ${compassDir(it.az)}</div>
+              <div class="text-[9px] uppercase ${up ? 'text-emerald-400/80' : 'text-slate-500'}">${up ? 'Visible' : 'Below'}</div>
+            </div>
+          `;
+          btn.addEventListener('click', () => {
+            slewToRaDec(it.ra, it.dec, it.name);
+            if (it.obj) openInspector(it.obj);
+            if (window.innerWidth < 768) setDrawerOpen(false);
+          });
+          els.constellationList.appendChild(btn);
+        });
+      }
+
+      // =========================================================================
+      // 8. CANVAS RENDERER (60 FPS REAL-TIME SKY DOME)
+      // =========================================================================
+      let canvasW = 0, canvasH = 0, dpr = 1;
+
+      function resizeCanvas() {
+        dpr = Math.min(window.devicePixelRatio || 1, 2);
+        canvasW = window.innerWidth;
+        canvasH = window.innerHeight;
+        els.canvas.width = Math.floor(canvasW * dpr);
+        els.canvas.height = Math.floor(canvasH * dpr);
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      }
+
+      function renderFrame(nowMs) {
+        const dt = Math.min(0.1, (nowMs - state.lastFrameMs) / 1000);
+        state.lastFrameMs = nowMs;
+
+        // Time-lapse advancement
+        if (state.timePlaying) {
+          state.timeOffsetHours += (dt * state.timeSpeed) / 3600;
+          if (state.timeOffsetHours > 12) state.timeOffsetHours -= 24;
+          els.sliderTimeOffset.value = state.timeOffsetHours.toFixed(1);
+          els.timeOffsetLabel.textContent = `${state.timeOffsetHours >= 0 ? '+' : ''}${state.timeOffsetHours.toFixed(1)}h`;
+        }
+
+        // Smooth camera slew to target
+        if (state.targetAz !== null && state.targetAlt !== null) {
+          let dAz = ((state.targetAz - state.viewAz + 540) % 360) - 180;
+          let dAlt = state.targetAlt - state.viewAlt;
+          state.viewAz = (state.viewAz + dAz * Math.min(1, dt * 6) + 360) % 360;
+          state.viewAlt = Math.max(-88, Math.min(89, state.viewAlt + dAlt * Math.min(1, dt * 6)));
+          if (Math.abs(dAz) < 0.15 && Math.abs(dAlt) < 0.15) {
+            state.targetAz = null;
+            state.targetAlt = null;
+          }
+        } else if (state.autoScan && !state.gyroActive) {
+          state.viewAz = (state.viewAz + dt * 5.5) % 360;
+        }
+
+        // Keyboard panning
+        if (keysDown.ArrowLeft || keysDown.KeyA) state.viewAz = (state.viewAz - dt * 55 + 360) % 360;
+        if (keysDown.ArrowRight || keysDown.KeyD) state.viewAz = (state.viewAz + dt * 55) % 360;
+        if (keysDown.ArrowUp || keysDown.KeyW) state.viewAlt = Math.min(89, state.viewAlt + dt * 45);
+        if (keysDown.ArrowDown || keysDown.KeyS) state.viewAlt = Math.max(-85, state.viewAlt - dt * 45);
+
+        const simDate = getSimDate();
+        const jd = getJulianDate(simDate);
+        const lstDeg = getLSTDeg(jd, state.lon);
+        const sunEq = getSunEquatorial(jd);
+        const sunHor = equatorialToHorizontal(sunEq.ra, sunEq.dec, state.lat, lstDeg);
+
+        // Compute Daylight washout factor (0 = pure night/stripped, 1 = full midday sun)
+        let daylightFactor = 0;
+        if (!state.stripDaylight && sunHor.alt > -12) {
+          daylightFactor = Math.max(0, Math.min(1, (sunHor.alt + 12) / 22));
+        }
+
+        const bortle = BORTLE_INFO[state.bortle];
+        // Effective limiting magnitude drops with both Bortle pollution and daylight
+        const effectiveLimMag = bortle.limMag - daylightFactor * 6.5;
+
+        // Clear canvas
+        ctx.clearRect(0, 0, canvasW, canvasH);
+
+        // Background sky gradient (transparent in Camera AR mode so live video shows through!)
+        const overlayAlpha = state.cameraActive ? state.camOpacity * 0.42 : 1.0;
+        if (overlayAlpha > 0.01) {
+          const grad = ctx.createLinearGradient(0, 0, 0, canvasH);
+          if (daylightFactor > 0.05) {
+            // Realistic daytime / twilight atmospheric scattering
+            const rTop = Math.round(5 + daylightFactor * 30);
+            const gTop = Math.round(10 + daylightFactor * 88);
+            const bTop = Math.round(24 + daylightFactor * 168);
+            const rBot = Math.round(14 + daylightFactor * 115);
+            const gBot = Math.round(24 + daylightFactor * 155);
+            const bBot = Math.round(48 + daylightFactor * 190);
+            grad.addColorStop(0, `rgba(${rTop},${gTop},${bTop},${overlayAlpha})`);
+            grad.addColorStop(1, `rgba(${rBot},${gBot},${bBot},${overlayAlpha})`);
+          } else {
+            // Night sky modulated by Bortle light pollution dome
+            const gGlow = bortle.glow;
+            const rTop = Math.round(2 + gGlow * 28);
+            const gTop = Math.round(5 + gGlow * 24);
+            const bTop = Math.round(14 + gGlow * 34);
+            const rBot = Math.round(6 + gGlow * 95);
+            const gBot = Math.round(12 + gGlow * 62);
+            const bBot = Math.round(28 + gGlow * 36);
+            grad.addColorStop(0, `rgba(${rTop},${gTop},${bTop},${overlayAlpha})`);
+            grad.addColorStop(0.68, `rgba(${Math.round((rTop+rBot)/2)},${Math.round((gTop+gBot)/2)},${Math.round((bTop+bBot)/2)},${overlayAlpha})`);
+            grad.addColorStop(1, `rgba(${rBot},${gBot},${bBot},${overlayAlpha})`);
+          }
+          ctx.fillStyle = grad;
+          ctx.fillRect(0, 0, canvasW, canvasH);
+        }
+
+        const basis = buildCameraBasis(state.viewAz, state.viewAlt);
+        const focalLen = (Math.min(canvasW, canvasH) * 0.52) / Math.tan((state.fov * 0.5) * DEG);
+
+        // 1) MILKY WAY GALACTIC BAND (only shines brightly in low-pollution, stripped-daylight skies!)
+        const mwStrength = bortle.mwAlpha * (1 - daylightFactor) * (state.cameraActive ? state.camOpacity : 1);
+        if (state.showMilkyWay && mwStrength > 0.03) {
+          ctx.save();
+          ctx.globalCompositeOperation = 'lighter';
+          for (let i = 0; i < MILKY_WAY_KNOTS.length; i++) {
+            const k = MILKY_WAY_KNOTS[i];
+            const hor = equatorialToHorizontal(k.ra, k.dec, state.lat, lstDeg);
+            if (state.showGround && hor.alt < -8) continue;
+            const p = projectPoint(hor.alt, hor.az, basis, canvasW, canvasH, focalLen);
+            if (!p || p.x < -120 || p.x > canvasW + 120 || p.y < -120 || p.y > canvasH + 120) continue;
+            const radPx = (k.radiusDeg * DEG) * focalLen;
+            const alpha = k.intensity * mwStrength * 0.045;
+            const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, radPx);
+            if (k.warm) {
+              g.addColorStop(0, `rgba(186, 212, 255, ${alpha})`);
+              g.addColorStop(0.5, `rgba(147, 165, 225, ${alpha * 0.45})`);
+            } else {
+              g.addColorStop(0, `rgba(140, 185, 255, ${alpha})`);
+              g.addColorStop(0.5, `rgba(96, 130, 210, ${alpha * 0.4})`);
+            }
+            g.addColorStop(1, 'rgba(0,0,0,0)');
+            ctx.fillStyle = g;
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, radPx, 0, Math.PI * 2);
+            ctx.fill();
+          }
+          ctx.restore();
+        }
+
+        // 2) ALT/AZ COORDINATE GRID (Optional)
+        if (state.showGrid) {
+          ctx.save();
+          ctx.strokeStyle = 'rgba(56, 189, 248, 0.16)';
+          ctx.lineWidth = 1;
+          for (let alt = -60; alt <= 75; alt += 15) {
+            ctx.beginPath();
+            let started = false;
+            for (let az = 0; az <= 360; az += 6) {
+              const p = projectPoint(alt, az, basis, canvasW, canvasH, focalLen);
+              if (p && p.z > 0.05) {
+                if (!started) { ctx.moveTo(p.x, p.y); started = true; }
+                else ctx.lineTo(p.x, p.y);
+              } else {
+                started = false;
+              }
+            }
+            ctx.stroke();
+          }
+          for (let az = 0; az < 360; az += 30) {
+            ctx.beginPath();
+            let started = false;
+            for (let alt = -75; alt <= 85; alt += 5) {
+              const p = projectPoint(alt, az, basis, canvasW, canvasH, focalLen);
+              if (p && p.z > 0.05) {
+                if (!started) { ctx.moveTo(p.x, p.y); started = true; }
+                else ctx.lineTo(p.x, p.y);
+              } else {
+                started = false;
+              }
+            }
+            ctx.stroke();
+          }
+          ctx.restore();
+        }
+
+        // 3) FAINT BACKGROUND FIELD STARS
+        const starAlphaScale = state.cameraActive ? state.camOpacity : 1;
+        for (let i = 0; i < FIELD_STARS.length; i++) {
+          const fs = FIELD_STARS[i];
+          if (fs.mag > effectiveLimMag) continue;
+          const hor = equatorialToHorizontal(fs.ra, fs.dec, state.lat, lstDeg);
+          if (state.showGround && hor.alt < 0) continue;
+          const p = projectPoint(hor.alt, hor.az, basis, canvasW, canvasH, focalLen);
+          if (!p || p.x < -4 || p.x > canvasW + 4 || p.y < -4 || p.y > canvasH + 4) continue;
+          const vis = Math.max(0.08, Math.min(1, (effectiveLimMag - fs.mag) / 3.2)) * starAlphaScale;
+          const r = Math.max(0.55, (5.8 - fs.mag) * 0.42);
+          ctx.globalAlpha = vis * (hor.alt < 0 ? 0.35 : 0.85);
+          ctx.fillStyle = fs.color;
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        ctx.globalAlpha = 1;
+
+        // 4) COMPUTE NAMED STARS & CONSTELLATIONS
+        const starScreen = {};
+        state.projectedObjects = [];
+
+        for (let i = 0; i < STARS.length; i++) {
+          const s = STARS[i];
+          const hor = equatorialToHorizontal(s.ra, s.dec, state.lat, lstDeg);
+          const p = projectPoint(hor.alt, hor.az, basis, canvasW, canvasH, focalLen);
+          starScreen[s.id] = { s, hor, p };
+        }
+
+        // Draw Constellation Stick Figures
+        if (state.showLines) {
+          ctx.save();
+          const lineBaseAlpha = Math.max(0.12, (1 - daylightFactor * 0.82) * (1 - bortle.glow * 0.35)) * starAlphaScale;
+          ctx.lineWidth = 1.25;
+          for (let c = 0; c < CONSTELLATIONS.length; c++) {
+            const con = CONSTELLATIONS[c];
+            let sumX = 0, sumY = 0, count = 0;
+            ctx.strokeStyle = `rgba(56, 189, 248, ${lineBaseAlpha * 0.58})`;
+            ctx.beginPath();
+            for (let l = 0; l < con.lines.length; l++) {
+              const a = starScreen[con.lines[l][0]];
+              const b = starScreen[con.lines[l][1]];
+              if (!a || !b || !a.p || !b.p) continue;
+              if (a.p.z < 0.05 || b.p.z < 0.05) continue;
+              if (state.showGround && a.hor.alt < 0 && b.hor.alt < 0) continue;
+              ctx.moveTo(a.p.x, a.p.y);
+              ctx.lineTo(b.p.x, b.p.y);
+            }
+            ctx.stroke();
+
+            // Label constellation centroid
+            if (state.showLabels) {
+              const cHor = equatorialToHorizontal(con.ra, con.dec, state.lat, lstDeg);
+              if (!state.showGround || cHor.alt > -2) {
+                const cp = projectPoint(cHor.alt, cHor.az, basis, canvasW, canvasH, focalLen);
+                if (cp && cp.z > 0.15 && cp.x > 20 && cp.x < canvasW - 20 && cp.y > 40 && cp.y < canvasH - 40) {
+                  ctx.font = '600 11px Inter, sans-serif';
+                  ctx.textAlign = 'center';
+                  ctx.fillStyle = `rgba(125, 211, 252, ${Math.max(0.22, lineBaseAlpha * 0.88)})`;
+                  ctx.fillText(con.name.toUpperCase(), cp.x, cp.y);
+                }
+              }
+            }
+          }
+          ctx.restore();
+        }
+
+        // 5) DEEP SKY OBJECTS (Messier)
+        if (state.showDSO && daylightFactor < 0.45) {
+          for (let i = 0; i < DSOS.length; i++) {
+            const d = DSOS[i];
+            if (d.mag > effectiveLimMag + 2.2) continue;
+            const hor = equatorialToHorizontal(d.ra, d.dec, state.lat, lstDeg);
+            if (state.showGround && hor.alt < 0) continue;
+            const p = projectPoint(hor.alt, hor.az, basis, canvasW, canvasH, focalLen);
+            if (!p || p.z < 0.1 || p.x < -30 || p.x > canvasW + 30 || p.y < -30 || p.y > canvasH + 30) continue;
+            const alpha = Math.max(0.18, (1 - bortle.glow * 0.75) * (1 - daylightFactor)) * starAlphaScale;
+            const rad = 11 * d.size;
+            const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, rad);
+            g.addColorStop(0, d.color);
+            g.addColorStop(1, 'rgba(0,0,0,0)');
+            ctx.save();
+            ctx.globalAlpha = alpha * 0.55;
+            ctx.fillStyle = g;
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, rad, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.globalAlpha = alpha * 0.9;
+            ctx.strokeStyle = d.color;
+            ctx.lineWidth = 1;
+            ctx.setLineDash([2, 2]);
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, 6, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.restore();
+
+            if (state.showLabels) {
+              ctx.font = '500 10px JetBrains Mono, monospace';
+              ctx.textAlign = 'left';
+              ctx.fillStyle = `rgba(244, 180, 220, ${alpha})`;
+              ctx.fillText(d.name.split(' (')[0], p.x + 9, p.y + 3);
+            }
+            state.projectedObjects.push({ x: p.x, y: p.y, r: 16, obj: d });
+          }
+        }
+
+        // 6) NAMED BRIGHT STARS WITH REALISTIC SPECTRAL HALOS
+        for (let i = 0; i < STARS.length; i++) {
+          const item = starScreen[STARS[i].id];
+          const { s, hor, p } = item;
+          if (!p || p.z < 0.05) continue;
+          if (state.showGround && hor.alt < 0) continue;
+          if (s.mag > effectiveLimMag + 0.8) continue;
+
+          const color = SPECTRAL_COLORS[(s.spec || 'A')[0]] || '#ffffff';
+          const vis = Math.max(0.15, Math.min(1, (effectiveLimMag + 1.0 - s.mag) / 3.2)) * starAlphaScale * (hor.alt < 0 ? 0.45 : 1);
+          const radius = Math.max(1.6, Math.min(5.2, 3.7 - s.mag * 0.65));
+
+          // Soft glow halo for bright stars
+          if (s.mag < 2.2) {
+            const haloR = radius * 4.2;
+            const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, haloR);
+            g.addColorStop(0, color);
+            g.addColorStop(0.35, color + '55');
+            g.addColorStop(1, 'rgba(0,0,0,0)');
+            ctx.save();
+            ctx.globalAlpha = vis * 0.72;
+            ctx.fillStyle = g;
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, haloR, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
+          }
+
+          // Star core
+          ctx.save();
+          ctx.globalAlpha = vis;
+          ctx.fillStyle = '#ffffff';
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, radius * 0.78, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.strokeStyle = color;
+          ctx.lineWidth = 1.1;
+          ctx.stroke();
+          ctx.restore();
+
+          // Label brightest stars
+          if (state.showLabels && s.mag < 2.15 && p.x > 16 && p.x < canvasW - 60 && p.y > 30 && p.y < canvasH - 30) {
+            ctx.font = '500 10.5px Inter, sans-serif';
+            ctx.textAlign = 'left';
+            ctx.fillStyle = `rgba(241, 245, 249, ${Math.min(0.95, vis)})`;
+            ctx.fillText(s.name, p.x + radius + 5, p.y + 3);
+          }
+
+          state.projectedObjects.push({ x: p.x, y: p.y, r: Math.max(14, radius * 3.5), obj: s });
+        }
+
+        // 7) SUN MARKER (shows where the Sun actually is — dimmed when daylight is stripped!)
+        const sunProj = projectPoint(sunHor.alt, sunHor.az, basis, canvasW, canvasH, focalLen);
+        if (sunProj && sunProj.z > 0.05 && (!state.showGround || sunHor.alt > -3)) {
+          ctx.save();
+          const sunR = state.stripDaylight ? 14 : 46;
+          const sg = ctx.createRadialGradient(sunProj.x, sunProj.y, 0, sunProj.x, sunProj.y, sunR);
+          sg.addColorStop(0, state.stripDaylight ? 'rgba(253, 224, 71, 0.75)' : 'rgba(255, 252, 220, 1)');
+          sg.addColorStop(0.4, state.stripDaylight ? 'rgba(251, 191, 36, 0.25)' : 'rgba(253, 224, 71, 0.55)');
+          sg.addColorStop(1, 'rgba(251, 191, 36, 0)');
+          ctx.fillStyle = sg;
+          ctx.beginPath();
+          ctx.arc(sunProj.x, sunProj.y, sunR, 0, Math.PI * 2);
+          ctx.fill();
+          if (state.showLabels) {
+            ctx.font = '600 10px JetBrains Mono, monospace';
+            ctx.textAlign = 'center';
+            ctx.fillStyle = '#fde047';
+            ctx.fillText(state.stripDaylight ? 'SUN (GLARE STRIPPED)' : 'SUN', sunProj.x, sunProj.y + sunR + 11);
+          }
+          ctx.restore();
+        }
+
+        // 8) HORIZON LINE, GROUND MASK & CARDINAL COMPASS MARKERS
+        ctx.save();
+        if (state.showGround && !state.cameraActive) {
+          // Subtle translucent ground silhouette below 0 deg altitude
+          ctx.beginPath();
+          let pts = [];
+          for (let az = 0; az <= 360; az += 3) {
+            const p = projectPoint(0, az, basis, canvasW, canvasH, focalLen);
+            if (p && p.z > 0.02) pts.push(p);
+          }
+          if (pts.length > 2) {
+            pts.sort((a, b) => a.x - b.x);
+            ctx.moveTo(pts[0].x - 200, canvasH + 200);
+            ctx.lineTo(pts[0].x - 200, pts[0].y);
+            for (let i = 0; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+            ctx.lineTo(pts[pts.length - 1].x + 200, pts[pts.length - 1].y);
+            ctx.lineTo(pts[pts.length - 1].x + 200, canvasH + 200);
+            ctx.closePath();
+            ctx.fillStyle = 'rgba(4, 8, 16, 0.72)';
+            ctx.fill();
+          }
+        }
+
+        // Horizon ring
+        ctx.strokeStyle = 'rgba(56, 189, 248, 0.32)';
+        ctx.lineWidth = 1;
+        ctx.setLineDash([4, 4]);
+        ctx.beginPath();
+        let hStart = false;
+        for (let az = 0; az <= 360; az += 3) {
+          const p = projectPoint(0, az, basis, canvasW, canvasH, focalLen);
+          if (p && p.z > 0.05) {
+            if (!hStart) { ctx.moveTo(p.x, p.y); hStart = true; }
+            else ctx.lineTo(p.x, p.y);
+          } else {
+            hStart = false;
+          }
+        }
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        // Cardinal compass labels
+        const cardinals = [
+          { az: 0, label: 'N', color: '#f87171' },
+          { az: 45, label: 'NE', color: '#94a3b8' },
+          { az: 90, label: 'E', color: '#38bdf8' },
+          { az: 135, label: 'SE', color: '#94a3b8' },
+          { az: 180, label: 'S', color: '#fbbf24' },
+          { az: 225, label: 'SW', color: '#94a3b8' },
+          { az: 270, label: 'W', color: '#38bdf8' },
+          { az: 315, label: 'NW', color: '#94a3b8' }
+        ];
+        ctx.font = '700 12px JetBrains Mono, monospace';
+        ctx.textAlign = 'center';
+        cardinals.forEach(c => {
+          const p = projectPoint(0.5, c.az, basis, canvasW, canvasH, focalLen);
+          if (p && p.z > 0.1 && p.x > 10 && p.x < canvasW - 10 && p.y > 40 && p.y < canvasH - 40) {
+            ctx.fillStyle = c.color;
+            ctx.fillText(c.label, p.x, p.y - 6);
+          }
+        });
+        ctx.restore();
+
+        // 9) SELECTED TARGET RETICLE
+        if (state.selectedObj) {
+          const sHor = equatorialToHorizontal(state.selectedObj.ra, state.selectedObj.dec, state.lat, lstDeg);
+          const sp = projectPoint(sHor.alt, sHor.az, basis, canvasW, canvasH, focalLen);
+          if (sp && sp.z > 0.05) {
+            ctx.save();
+            const pulse = 13 + Math.sin(nowMs * 0.006) * 2.5;
+            ctx.strokeStyle = '#fbbf24';
+            ctx.lineWidth = 1.6;
+            ctx.beginPath();
+            ctx.arc(sp.x, sp.y, pulse, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.restore();
+          }
+        }
+
+        // 10) LIVE HUD TELEMETRY READOUTS (throttled lightly via frame math)
+        els.hudAzAlt.textContent = `${state.viewAz.toFixed(1)}° ${compassDir(state.viewAz)} • ${state.viewAlt >= 0 ? '+' : ''}${state.viewAlt.toFixed(1)}°`;
+        els.hudLST.textContent = formatHMS(lstDeg / 15);
+        const sunPhase = sunHor.alt > 0 ? 'Day' : (sunHor.alt > -12 ? 'Twilight' : 'Night');
+        els.hudSunAlt.textContent = `${sunHor.alt >= 0 ? '+' : ''}${sunHor.alt.toFixed(1)}° (${sunPhase})`;
+        els.clockReadout.textContent = simDate.toLocaleString(undefined, {
+          month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit'
+        });
+
+        if (state.selectedObj) updateInspectorLiveCoords();
+
+        requestAnimationFrame(renderFrame);
+      }
+
+      // =========================================================================
+      // 9. POINTER, TOUCH, PINCH-ZOOM & KEYBOARD INTERACTION
+      // =========================================================================
+      let dragging = false;
+      let dragMoved = false;
+      let lastX = 0, lastY = 0;
+      let activePointers = new Map();
+      let lastPinchDist = null;
+      const keysDown = {};
+
+      els.canvas.addEventListener('pointerdown', (e) => {
+        els.canvas.setPointerCapture(e.pointerId);
+        activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+        if (activePointers.size === 1) {
+          dragging = true;
+          dragMoved = false;
+          lastX = e.clientX;
+          lastY = e.clientY;
+          state.targetAz = null;
+          state.targetAlt = null;
+        } else if (activePointers.size === 2) {
+          const pts = Array.from(activePointers.values());
+          lastPinchDist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+        }
+      });
+
+      els.canvas.addEventListener('pointermove', (e) => {
+        if (!activePointers.has(e.pointerId)) return;
+        activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+        if (activePointers.size === 2 && lastPinchDist !== null) {
+          const pts = Array.from(activePointers.values());
+          const dist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+          const delta = lastPinchDist - dist;
+          state.fov = Math.max(25, Math.min(110, state.fov + delta * 0.14));
+          els.sliderFOV.value = Math.round(state.fov);
+          els.fovReadout.textContent = `${Math.round(state.fov)}°`;
+          lastPinchDist = dist;
+          dragMoved = true;
+          return;
+        }
+
+        if (!dragging) return;
+        const dx = e.clientX - lastX;
+        const dy = e.clientY - lastY;
+        if (Math.hypot(dx, dy) > 3) dragMoved = true;
+        const scale = state.fov / Math.min(canvasW, canvasH);
+        state.viewAz = (state.viewAz - dx * scale * 1.15 + 360) % 360;
+        state.viewAlt = Math.max(-85, Math.min(89, state.viewAlt + dy * scale * 1.15));
+        lastX = e.clientX;
+        lastY = e.clientY;
+      });
+
+      function endPointer(e) {
+        if (!dragMoved && activePointers.size === 1) {
+          // Tap/Click hit-test against projected stars & DSOs
+          const rect = els.canvas.getBoundingClientRect();
+          const cx = e.clientX - rect.left;
+          const cy = e.clientY - rect.top;
+          let best = null, bestD = Infinity;
+          for (let i = 0; i < state.projectedObjects.length; i++) {
+            const p = state.projectedObjects[i];
+            const d = Math.hypot(p.x - cx, p.y - cy);
+            if (d <= p.r + 10 && d < bestD) {
+              bestD = d;
+              best = p.obj;
+            }
+          }
+          if (best) openInspector(best);
+        }
+        activePointers.delete(e.pointerId);
+        if (activePointers.size < 2) lastPinchDist = null;
+        if (activePointers.size === 0) dragging = false;
+      }
+
+      els.canvas.addEventListener('pointerup', endPointer);
+      els.canvas.addEventListener('pointercancel', endPointer);
+
+      els.canvas.addEventListener('wheel', (e) => {
+        e.preventDefault();
+        state.fov = Math.max(25, Math.min(110, state.fov + Math.sign(e.deltaY) * 4));
+        els.sliderFOV.value = Math.round(state.fov);
+        els.fovReadout.textContent = `${Math.round(state.fov)}°`;
+      }, { passive: false });
+
+      window.addEventListener('keydown', (e) => {
+        if (document.activeElement && ['INPUT', 'SELECT', 'TEXTAREA'].includes(document.activeElement.tagName)) return;
+        keysDown[e.code] = true;
+      });
+      window.addEventListener('keyup', (e) => {
+        keysDown[e.code] = false;
+      });
+
+      // =========================================================================
+      // 10. WIRE ALL CONTROLS VIA addEventListener
+      // =========================================================================
+      els.btnCameraAR.addEventListener('click', toggleCameraAR);
+      els.btnGyro.addEventListener('click', () => enableGyro(false));
+      els.btnGPS.addEventListener('click', requestGPS);
+      els.btnGPSDrawer.addEventListener('click', requestGPS);
+      els.btnToggleDrawer.addEventListener('click', () => setDrawerOpen(!state.drawerOpen));
+
+      els.tabFinder.addEventListener('click', () => setActiveTab('finder'));
+      els.tabLocation.addEventListener('click', () => setActiveTab('location'));
+      els.tabOptics.addEventListener('click', () => setActiveTab('optics'));
+
+      els.inputSearch.addEventListener('input', (e) => {
+        state.searchQuery = e.target.value;
+        renderConstellationList();
+      });
+
+      els.btnAutoScan.addEventListener('click', () => {
+        state.autoScan = !state.autoScan;
+        els.btnAutoScan.textContent = `Auto-Scan: ${state.autoScan ? 'ON' : 'OFF'}`;
+      });
+
+      els.btnApplyCoords.addEventListener('click', () => {
+        const lat = parseFloat(els.inputLat.value);
+        const lon = parseFloat(els.inputLon.value);
+        if (isNaN(lat) || isNaN(lon) || lat < -90 || lat > 90 || lon < -180 || lon > 180) {
+          showToast('Enter valid latitude (-90 to 90) and longitude (-180 to 180).');
+          return;
+        }
+        state.lat = lat;
+        state.lon = lon;
+        state.locName = 'Custom GPS';
+        savePrefs();
+        updateTelemetryLabels();
+        renderConstellationList();
+        showToast(`Sky updated for ${lat.toFixed(3)}°, ${lon.toFixed(3)}°`);
+      });
+
+      [
+        els.presetSouthRiver,
+        els.presetCherrySprings,
+        els.presetMaunaKea,
+        els.presetJoshuaTree,
+        els.presetNaturalBridges,
+        els.presetCerroPachon
+      ].forEach(btn => {
+        btn.addEventListener('click', () => {
+          state.lat = parseFloat(btn.dataset.lat);
+          state.lon = parseFloat(btn.dataset.lon);
+          state.locName = btn.dataset.name;
+          els.inputLat.value = state.lat;
+          els.inputLon.value = state.lon;
+          savePrefs();
+          updateTelemetryLabels();
+          renderConstellationList();
+          showToast(`Observer moved to ${state.locName}`);
+        });
+      });
+
+      els.sliderTimeOffset.addEventListener('input', (e) => {
+        state.timeOffsetHours = parseFloat(e.target.value);
+        els.timeOffsetLabel.textContent = state.timeOffsetHours === 0
+          ? '+0.0h (Live)'
+          : `${state.timeOffsetHours >= 0 ? '+' : ''}${state.timeOffsetHours.toFixed(1)}h`;
+        renderConstellationList();
+      });
+
+      els.btnTimeNow.addEventListener('click', () => {
+        state.customBaseTimeMs = null;
+        state.timeOffsetHours = 0;
+        state.timePlaying = false;
+        els.sliderTimeOffset.value = '0';
+        els.timeOffsetLabel.textContent = '+0.0h (Live)';
+        els.btnTimePlay.textContent = '▶ Time-Lapse';
+        els.btnTimePlay.classList.remove('active');
+        els.inputDateTime.value = '';
+        renderConstellationList();
+        showToast('Clock synced to live real time.');
+      });
+
+      els.btnTimePlay.addEventListener('click', () => {
+        state.timePlaying = !state.timePlaying;
+        els.btnTimePlay.textContent = state.timePlaying ? '⏸ Pause' : '▶ Time-Lapse';
+        els.btnTimePlay.classList.toggle('active', state.timePlaying);
+      });
+
+      els.selectTimeSpeed.addEventListener('change', (e) => {
+        state.timeSpeed = parseFloat(e.target.value) || 600;
+      });
+
+      els.inputDateTime.addEventListener('change', (e) => {
+        if (!e.target.value) return;
+        const dt = new Date(e.target.value);
+        if (!isNaN(dt.getTime())) {
+          state.customBaseTimeMs = dt.getTime();
+          state.timeOffsetHours = 0;
+          els.sliderTimeOffset.value = '0';
+          els.timeOffsetLabel.textContent = 'Custom Date';
+          renderConstellationList();
+          showToast(`Sky calculated for ${dt.toLocaleString()}`);
+        }
+      });
+
+      els.sliderBortle.addEventListener('input', (e) => {
+        state.bortle = parseInt(e.target.value, 10);
+        const info = BORTLE_INFO[state.bortle];
+        els.bortleLabel.textContent = `Bortle ${state.bortle} • ${info.name.split(' ')[0]}`;
+        els.skyStateBadge.textContent = state.bortle === 1 && state.stripDaylight
+          ? 'ZERO POLLUTION'
+          : `BORTLE ${state.bortle}`;
+      });
+
+      els.btnToggleDaylight.addEventListener('click', () => {
+        state.stripDaylight = !state.stripDaylight;
+        els.btnToggleDaylight.classList.toggle('active-warm', state.stripDaylight);
+        els.btnToggleDaylight.innerHTML = `<span>☀ Strip Daylight: ${state.stripDaylight ? 'ON' : 'OFF'}</span>`;
+        els.skyStateBadge.textContent = state.bortle === 1 && state.stripDaylight
+          ? 'ZERO POLLUTION'
+          : (state.stripDaylight ? `BORTLE ${state.bortle}` : 'REAL ATMOSPHERE');
+      });
+
+      els.btnToggleLines.addEventListener('click', () => {
+        state.showLines = !state.showLines;
+        els.btnToggleLines.classList.toggle('active', state.showLines);
+      });
+
+      els.btnToggleLabels.addEventListener('click', () => {
+        state.showLabels = !state.showLabels;
+        els.btnToggleLabels.classList.toggle('active', state.showLabels);
+      });
+
+      els.btnZoomIn.addEventListener('click', () => {
+        state.fov = Math.max(25, state.fov - 10);
+        els.sliderFOV.value = Math.round(state.fov);
+        els.fovReadout.textContent = `${Math.round(state.fov)}°`;
+      });
+
+      els.btnZoomOut.addEventListener('click', () => {
+        state.fov = Math.min(110, state.fov + 10);
+        els.sliderFOV.value = Math.round(state.fov);
+        els.fovReadout.textContent = `${Math.round(state.fov)}°`;
+      });
+
+      els.sliderFOV.addEventListener('input', (e) => {
+        state.fov = parseFloat(e.target.value);
+        els.fovReadout.textContent = `${Math.round(state.fov)}°`;
+      });
+
+      els.sliderCamOpacity.addEventListener('input', (e) => {
+        const val = parseInt(e.target.value, 10);
+        state.camOpacity = val / 100;
+        els.camOpacityReadout.textContent = `${val}%`;
+      });
+
+      els.btnToggleGrid.addEventListener('click', () => {
+        state.showGrid = !state.showGrid;
+        els.btnToggleGrid.classList.toggle('active', state.showGrid);
+      });
+
+      els.btnToggleGround.addEventListener('click', () => {
+        state.showGround = !state.showGround;
+        els.btnToggleGround.classList.toggle('active', state.showGround);
+      });
+
+      els.btnToggleMilkyWay.addEventListener('click', () => {
+        state.showMilkyWay = !state.showMilkyWay;
+        els.btnToggleMilkyWay.classList.toggle('active', state.showMilkyWay);
+      });
+
+      els.btnToggleDSO.addEventListener('click', () => {
+        state.showDSO = !state.showDSO;
+        els.btnToggleDSO.classList.toggle('active', state.showDSO);
+      });
+
+      els.btnToggleNightVision.addEventListener('click', () => {
+        state.nightVision = !state.nightVision;
+        document.body.classList.toggle('night-vision', state.nightVision);
+        els.btnToggleNightVision.classList.toggle('active-red', state.nightVision);
+      });
+
+      els.btnAudio.addEventListener('click', toggleAudio);
+      els.btnExportHTML.addEventListener('click', exportSelfContainedHTML);
+
+      els.btnCloseInspector.addEventListener('click', () => {
+        state.selectedObj = null;
+        els.inspectorCard.classList.add('hidden');
+      });
+
+      els.btnCenterSelected.addEventListener('click', () => {
+        if (state.selectedObj) {
+          slewToRaDec(state.selectedObj.ra, state.selectedObj.dec, state.selectedObj.name);
+        }
+      });
+
+      // =========================================================================
+      // 11. BOOT SEQUENCE
+      // =========================================================================
+      window.addEventListener('resize', resizeCanvas);
+      resizeCanvas();
+      els.inputLat.value = state.lat;
+      els.inputLon.value = state.lon;
+      updateTelemetryLabels();
+      setDrawerOpen(state.drawerOpen);
+      setActiveTab('finder');
+      renderConstellationList();
+
+      // Auto-aim on startup toward the highest-altitude iconic constellation currently above horizon
+      const bootJd = getJulianDate(getSimDate());
+      const bootLst = getLSTDeg(bootJd, state.lon);
+      let bestCon = null, bestAlt = -90;
+      CONSTELLATIONS.forEach(c => {
+        const pos = equatorialToHorizontal(c.ra, c.dec, state.lat, bootLst);
+        if (pos.alt > 20 && pos.alt < 75 && pos.alt > bestAlt) {
+          bestAlt = pos.alt;
+          bestCon = { c, pos };
+        }
+      });
+      if (bestCon) {
+        state.viewAz = bestCon.pos.az;
+        state.viewAlt = bestCon.pos.alt;
+      }
+
+      requestAnimationFrame(renderFrame);
+    })();
+  </script>
+</body>
+</html>
